@@ -2,8 +2,10 @@ package torrent_manager
 
 import (
 	"database/sql"
-	"debrid_drive/database"
 	"fmt"
+
+	"debrid_drive/config"
+	"debrid_drive/database"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
@@ -81,7 +83,7 @@ func (instance *Instance) AddTorrent(transaction *sql.Tx, torrent *real_debrid_a
 		name := torrentFile.Path[1:]
 		link := torrentInfo.Links[index-skippedFiles]
 
-		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, "application/debrid-drive", "")
+		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, config.GetContentType(), "")
 		if err != nil {
 			return fmt.Errorf("Failed to create file: %v", err)
 		}

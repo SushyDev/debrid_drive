@@ -5,9 +5,11 @@ import (
 	"log"
 	"net"
 
+	"debrid_drive/config"
 	"debrid_drive/vfs_api"
 
 	"debrid_drive/torrent_manager"
+
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 	vfs "github.com/sushydev/vfs_go"
@@ -198,14 +200,6 @@ func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.Remov
 	return &vfs_api.RemoveResponse{}, nil
 }
 
-func afterFunc(node *vfs_node.Node) {
-	log.Printf("Deleted %v\n", node.GetName())
-}
-
-// function delete recursive
-// takes in directory id, callback for each file delete and callback for each directory delete
-// this way in the callback for file delete i can check if there is a torrent linked to it and delete it
-
 func (service *FileSystemService) Rename(ctx context.Context, req *vfs_api.RenameRequest) (*vfs_api.RenameResponse, error) {
 	directory, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
 	if err != nil {
@@ -304,7 +298,6 @@ func (service *FileSystemService) Link(ctx context.Context, req *vfs_api.LinkReq
 	}
 
 	if existingFile == nil {
-		log.Printf("File not found %v\n", req)
 		return nil, nil
 	}
 
@@ -329,7 +322,7 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 		return nil, nil
 	}
 
-	if file.GetContentType() != "application/debrid-drive" {
+	if file.GetContentType() != config.GetContentType() {
 		return nil, nil
 	}
 
@@ -341,8 +334,6 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 	if torrentFile == nil {
 		return nil, nil
 	}
-
-	log.Printf("Getting video size for %v\n", torrentFile)
 
 	return &vfs_api.GetVideoSizeResponse{
 		Size: uint64(torrentFile.GetSize()),
@@ -359,7 +350,7 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, nil
 	}
 
-	if file.GetContentType() != "application/debrid-drive" {
+	if file.GetContentType() != config.GetContentType() {
 		return nil, nil
 	}
 

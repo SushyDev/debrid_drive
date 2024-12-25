@@ -3,7 +3,6 @@ package poller
 import (
 	"database/sql"
 	"debrid_drive/database"
-	"fmt"
 	"log"
 	"time"
 
@@ -29,16 +28,16 @@ func (instance *Instance) Poll() {
 		torrents, err := real_debrid_api.GetTorrents(instance.client)
 		if err != nil {
 			log.Printf("Failed to get torrents: %v", err)
-			time.Sleep(5 * time.Second)
+			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		fmt.Println("Fetched torrents")
+		log.Println("Fetched torrents")
 
 		instance.checkNewEntries(*torrents)
 		instance.checkRemovedEntries(*torrents)
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(30 * time.Second)
 	}
 }
 
