@@ -35,28 +35,9 @@ func main() {
 
 	client := real_debrid_go.NewClient(token)
 
-	fileSystem, err := vfs.NewFileSystem()
+	fileSystem, err := vfs.NewFileSystem("debrid_drive", "./file_system.db")
 	if err != nil {
 		log.Fatalf("Failed to create file system: %v", err)
-	}
-
-	root := fileSystem.GetRoot()
-
-	qdebrid, err := fileSystem.FindOrCreateDirectory("qdebrid", root)
-	if err != nil {
-		log.Fatalf("Failed to create directory: %v", err)
-	}
-
-	_, err = fileSystem.FindOrCreateDirectory("downloads", qdebrid)
-
-	file, err := fileSystem.FindFile("test.txt", qdebrid)
-
-	if err != nil {
-		log.Fatalf("Failed to find file: %v", err)
-	}
-
-	if file == nil {
-		_, err = fileSystem.CreateFile("test.txt", qdebrid, "text/plain", "")
 	}
 
 	torrentManager := torrent_manager.NewInstance(client, db, fileSystem)

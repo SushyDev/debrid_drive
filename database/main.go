@@ -29,7 +29,7 @@ func NewInstance() (*Instance, error) {
 }
 
 func initializeDatabase() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "debrid_drive.db")
+	db, err := sql.Open("sqlite", "torrents.db")
 	if err != nil {
 		return nil, fmt.Errorf("Failed to open database: %v", err)
 	}

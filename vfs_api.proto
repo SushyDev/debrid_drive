@@ -87,7 +87,9 @@ message LinkRequest {
     string name = 3;
 }
 
-message LinkResponse {}
+message LinkResponse {
+    Node node = 1;
+}
 
 message GetVideoSizeRequest {
     uint64 identifier = 1;

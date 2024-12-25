@@ -293,7 +293,30 @@ func (service *FileSystemService) Mkdir(ctx context.Context, req *vfs_api.MkdirR
 }
 
 func (service *FileSystemService) Link(ctx context.Context, req *vfs_api.LinkRequest) (*vfs_api.LinkResponse, error) {
-	return nil, nil
+	parent, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
+	if err != nil {
+		return nil, err
+	}
+
+	existingFile, err := service.fileSystem.GetFile(req.Identifier)
+	if err != nil {
+		return nil, err
+	}
+
+	if existingFile == nil {
+		log.Printf("File not found %v\n", req)
+		return nil, nil
+	}
+
+	file, err := service.fileSystem.UpdateFile(existingFile, req.Name, parent, existingFile.GetContentType(), existingFile.GetData())
+
+	return &vfs_api.LinkResponse{
+		Node: &vfs_api.Node{
+			Identifier: file.GetIdentifier(),
+			Name:       file.GetName(),
+			Type:       vfs_api.NodeType_FILE,
+		},
+	}, nil
 }
 
 func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api.GetVideoSizeRequest) (*vfs_api.GetVideoSizeResponse, error) {
@@ -306,7 +329,7 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 		return nil, nil
 	}
 
-	if file.GetContentType() != "application/octet-stream" {
+	if file.GetContentType() != "application/debrid-drive" {
 		return nil, nil
 	}
 
@@ -336,7 +359,7 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, nil
 	}
 
-	if file.GetContentType() != "application/octet-stream" {
+	if file.GetContentType() != "application/debrid-drive" {
 		return nil, nil
 	}
 

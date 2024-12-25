@@ -25,6 +25,10 @@ func NewInstance(client *real_debrid.Client, database *database.Instance, fileSy
 	}
 }
 
+func (instance *Instance) GetNewTorrentsDir() (*node.Directory, error) {
+	return instance.fileSystem.FindOrCreateDirectory("new_torrents", instance.fileSystem.GetRoot())
+}
+
 func (instance *Instance) NewTransaction() (*sql.Tx, error) {
 	return instance.database.NewTransaction()
 }
@@ -47,7 +51,12 @@ func (instance *Instance) TorrentExists(transaction *sql.Tx, torrent *real_debri
 // -- 1. Create file for torrent file
 // -- 2. Add torrent file to database
 func (instance *Instance) AddTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) error {
-	directory, err := instance.fileSystem.FindOrCreateDirectory(torrent.ID, instance.fileSystem.GetRoot())
+	newTorrentsDir, err := instance.GetNewTorrentsDir()
+	if err != nil {
+		return fmt.Errorf("Failed to get new torrents directory: %v", err)
+	}
+
+	directory, err := instance.fileSystem.FindOrCreateDirectory(torrent.ID, newTorrentsDir)
 	if err != nil {
 		return fmt.Errorf("Failed to create directory: %v", err)
 	}
