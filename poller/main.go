@@ -72,6 +72,8 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 			continue
 		}
 
+        instance.log.Infof("Adding new entry: %s - %s", torrent.ID, torrent.Filename)
+
 		err = instance.mediaManager.AddTorrent(transaction, torrent)
 		if err != nil {
 			instance.error("Failed to add new entry", err)
@@ -110,6 +112,8 @@ func (instance *Poller) checkRemovedEntries(torrents real_debrid_api.Torrents) {
 		if ok {
 			continue
 		}
+
+        instance.log.Infof("Removing entry: %s - %s", databaseTorrent.GetTorrentIdentifier(), databaseTorrent.GetName())
 
 		instance.removeEntry(transaction, databaseTorrent)
 	}

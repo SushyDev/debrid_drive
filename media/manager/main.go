@@ -30,7 +30,7 @@ func NewMediaManager(client *real_debrid.Client, database *database.Instance, fi
 	}
 }
 
-func managerError(message string, err error) error {
+func (instance *MediaManager) error(message string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -49,17 +49,17 @@ func (instance *MediaManager) NewTransaction() (*sql.Tx, error) {
 func (instance *MediaManager) GetTorrentFileByFile(file *node.File) (*media_service.TorrentFile, error) {
 	transaction, err := instance.database.NewTransaction()
 	if err != nil {
-		return nil, managerError("Failed to create transaction", err)
+		return nil, instance.error("Failed to create transaction", err)
 	}
 
 	torrentFile, err := instance.mediaService.GetTorrentFileByFileId(transaction, file.GetIdentifier())
 	if err != nil {
-		return nil, managerError("Failed to get torrent file by file id", err)
+		return nil, instance.error("Failed to get torrent file by file id", err)
 	}
 
 	err = transaction.Commit()
 	if err != nil {
-		return nil, managerError("Failed to commit transaction", err)
+		return nil, instance.error("Failed to commit transaction", err)
 	}
 
 	return torrentFile, nil
@@ -68,17 +68,17 @@ func (instance *MediaManager) GetTorrentFileByFile(file *node.File) (*media_serv
 func (instance *MediaManager) GetTorrentByTorrentFile(torrentFile *media_service.TorrentFile) (*media_service.Torrent, error) {
 	transaction, err := instance.database.NewTransaction()
 	if err != nil {
-		return nil, managerError("Failed to create transaction", err)
+		return nil, instance.error("Failed to create transaction", err)
 	}
 
 	torrent, err := instance.mediaService.GetTorrentByTorrentFileId(transaction, torrentFile.GetIdentifier())
 	if err != nil {
-		return nil, managerError("Failed to get torrent by torrent file id", err)
+		return nil, instance.error("Failed to get torrent by torrent file id", err)
 	}
 
 	err = transaction.Commit()
 	if err != nil {
-		return nil, managerError("Failed to commit transaction", err)
+		return nil, instance.error("Failed to commit transaction", err)
 	}
 
 	return torrent, nil
@@ -96,22 +96,22 @@ func (instance *MediaManager) TorrentExists(transaction *sql.Tx, torrent *real_d
 func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) error {
 	newTorrentsDir, err := instance.GetNewTorrentsDir()
 	if err != nil {
-		return managerError("Failed to get new torrents directory", err)
+		return instance.error("Failed to get new torrents directory", err)
 	}
 
 	directory, err := instance.fileSystem.FindOrCreateDirectory(torrent.ID, newTorrentsDir)
 	if err != nil {
-		return managerError("Failed to create directory", err)
+		return instance.error("Failed to create directory", err)
 	}
 
 	databaseTorrent, err := instance.mediaService.AddTorrent(transaction, torrent)
 	if err != nil {
-		return managerError("Failed to add torrent to database", err)
+		return instance.error("Failed to add torrent to database", err)
 	}
 
 	torrentInfo, err := real_debrid_api.GetTorrentInfo(instance.client, torrent.ID)
 	if err != nil {
-		return managerError("Failed to get torrent info", err)
+		return instance.error("Failed to get torrent info", err)
 	}
 
 	skippedFiles := 0
@@ -126,12 +126,12 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 
 		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, config.GetContentType(), "")
 		if err != nil {
-			return managerError("Failed to create file", err)
+			return instance.error("Failed to create file", err)
 		}
 
 		_, err = instance.mediaService.AddTorrentFile(transaction, databaseTorrent, torrentFile, fileNode, link, index)
 		if err != nil {
-			return managerError("Failed to add torrent file to database", err)
+			return instance.error("Failed to add torrent file to database", err)
 		}
 	}
 
@@ -146,17 +146,17 @@ func (instance *MediaManager) DeleteTorrent(transaction *sql.Tx, torrent *media_
 
 	err = instance.removeTorrentFiles(transaction, torrent)
 	if err != nil {
-		return managerError("Failed to remove torrent files", err)
+		return instance.error("Failed to remove torrent files", err)
 	}
 
 	err = instance.removeTorrentFromDatabase(transaction, torrent)
 	if err != nil {
-		return managerError("Failed to remove torrent from database", err)
+		return instance.error("Failed to remove torrent from database", err)
 	}
 
 	err = instance.removeTorrentFromApi(torrent)
 	if err != nil {
-		return managerError("Failed to delete torrent from api", err)
+		return instance.error("Failed to delete torrent from api", err)
 	}
 
 	return nil
@@ -166,18 +166,18 @@ func (instance *MediaManager) DeleteTorrent(transaction *sql.Tx, torrent *media_
 func (instance *MediaManager) removeTorrentFiles(transaction *sql.Tx, databaseTorrent *media_service.Torrent) error {
 	torrentFiles, err := instance.mediaService.GetTorrentFiles(transaction, databaseTorrent)
 	if err != nil {
-		return managerError("Failed to get torrent files", err)
+		return instance.error("Failed to get torrent files", err)
 	}
 
 	for _, torrentFile := range torrentFiles {
 		err = instance.mediaService.RemoveTorrentFile(transaction, torrentFile)
 		if err != nil {
-			return managerError("Failed to remove torrent file", err)
+			return instance.error("Failed to remove torrent file", err)
 		}
 
 		vfsFile, err := instance.fileSystem.GetFile(torrentFile.GetFileIdentifier())
 		if err != nil {
-			return managerError("Failed to get file", err)
+			return instance.error("Failed to get file", err)
 		}
 
 		if vfsFile == nil {
@@ -186,7 +186,7 @@ func (instance *MediaManager) removeTorrentFiles(transaction *sql.Tx, databaseTo
 
 		err = instance.fileSystem.DeleteFile(vfsFile)
 		if err != nil {
-			return managerError("Failed to delete file", err)
+			return instance.error("Failed to delete file", err)
 		}
 	}
 

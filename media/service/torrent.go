@@ -20,6 +20,10 @@ func (torrent *Torrent) GetTorrentIdentifier() string {
 	return torrent.torrentIdentifier
 }
 
+func (torrent *Torrent) GetName() string {
+    return torrent.name
+}
+
 func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {
 	query := `
         SELECT EXISTS(SELECT 1 FROM torrents WHERE torrent_id = ?)
