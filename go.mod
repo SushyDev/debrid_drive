@@ -2,9 +2,8 @@ module debrid_drive
 
 go 1.23.2
 
-replace github.com/sushydev/real_debrid_go => /Users/sushy/Documents/projects/real_debrid_go
-
-require github.com/sushydev/real_debrid_go v0.0.0-00010101000000-000000000000
+replace github.com/sushydev/real_debrid_go => ../real_debrid_go
+replace github.com/sushydev/vfs_go => ../vfs_go
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -13,7 +12,8 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/sushydev/vfs_go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/sushydev/real_debrid_go v1.0.0 // indirect
+	github.com/sushydev/vfs_go v1.0.0 // indirect
 	golang.org/x/net v0.31.0 // indirect
 	golang.org/x/sys v0.27.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
@@ -29,5 +29,3 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
-
-replace github.com/sushydev/vfs_go => ../vfs_go

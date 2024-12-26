@@ -10,6 +10,10 @@ github.com/ncruces/go-strftime v0.1.9 h1:bY0MQC28UADQmHmaF5dgpLmImcShSi2kHU9XLdh
 github.com/ncruces/go-strftime v0.1.9/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+github.com/sushydev/real_debrid_go v1.0.0 h1:1zU9G3KmGZrKCSwprC4ivSVPREXN052hypxrP4SpR+g=
+github.com/sushydev/real_debrid_go v1.0.0/go.mod h1:9Tst1Kkq1dDU/ErSYjheu/hJmNmEc0bGdoOy/OGbg4M=
+github.com/sushydev/vfs_go v1.0.0 h1:QxPWID5HVtUyianKiJOuBdROI4AJmBD8yez0snvveko=
+github.com/sushydev/vfs_go v1.0.0/go.mod h1:S8w93l3RTPw5As+YLjAYON2/tmOWHlMtjdCSF4uMWXc=
 golang.org/x/net v0.31.0 h1:68CPQngjLL0r2AlUKiSxtQFKvzRVbnzLwMUn5SzcLHo=
 golang.org/x/net v0.31.0/go.mod h1:P4fl1q7dY2hnZFxEk4pPSkDHF+QqjitcnDjUQyMM+pM=
 golang.org/x/sys v0.6.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
