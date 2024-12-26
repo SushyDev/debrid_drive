@@ -21,7 +21,7 @@ func (torrent *Torrent) GetTorrentIdentifier() string {
 }
 
 func (torrent *Torrent) GetName() string {
-    return torrent.name
+	return torrent.name
 }
 
 func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {

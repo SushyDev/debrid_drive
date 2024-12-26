@@ -122,7 +122,14 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		}
 
 		name := torrentFile.Path[1:]
-		link := torrentInfo.Links[index-skippedFiles]
+
+		linkIndex := index - skippedFiles
+
+		if linkIndex >= len(torrentInfo.Links) {
+			return instance.error("Failed to get link", nil)
+		}
+
+		link := torrentInfo.Links[linkIndex]
 
 		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, config.GetContentType(), "")
 		if err != nil {
