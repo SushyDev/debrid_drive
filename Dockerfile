@@ -31,7 +31,7 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
 # Copy the Pre-built binary file from the previous stage
-COPY --from=builder /main .
+COPY --from=builder /main /app/main
 
 # Command to run the executable
 ENTRYPOINT ["/app/main"]
