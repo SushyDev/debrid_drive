@@ -1,4 +1,3 @@
-# Stage 1: Build Stage
 FROM golang:1.23.2 AS builder
 
 # Set the Current Working Directory inside the container
@@ -19,7 +18,7 @@ COPY . .
 RUN grep -v '^replace' go.mod > go.mod.tmp && mv go.mod.tmp go.mod
 
 # Build the Go app
-RUN go build -o /main .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/main .
 
 # Stage 2: Run Stage
 FROM alpine:latest
@@ -31,7 +30,7 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 
 # Copy the Pre-built binary file from the previous stage
-COPY --from=builder /main /app/main
+COPY --from=builder /app/main /app/main
 
 # Command to run the executable
 ENTRYPOINT ["/app/main"]
