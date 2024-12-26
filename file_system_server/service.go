@@ -1,46 +1,50 @@
-package api
+package file_system_server
 
 import (
 	context "context"
-	"log"
-	"net"
 
 	"debrid_drive/config"
 	"debrid_drive/vfs_api"
 
-	"debrid_drive/torrent_manager"
+	media_manager "debrid_drive/media/manager"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 	vfs "github.com/sushydev/vfs_go"
 	vfs_node "github.com/sushydev/vfs_go/node"
-	grpc "google.golang.org/grpc"
 )
+
+var _ vfs_api.FileSystemServiceServer = &FileSystemService{}
 
 type FileSystemService struct {
 	vfs_api.UnimplementedFileSystemServiceServer
 
-	client         *real_debrid.Client
-	fileSystem     *vfs.FileSystem
-	torrentManager *torrent_manager.Instance
+	client       *real_debrid.Client
+	fileSystem   *vfs.FileSystem
+	mediaManager *media_manager.MediaManager
 }
 
-func NewApi(client *real_debrid.Client, fileSystem *vfs.FileSystem, torrentManager *torrent_manager.Instance) error {
-	listener, err := net.Listen("tcp", ":6969")
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+func nodeToNode(node *vfs_node.Node) *vfs_api.Node {
+	if node == nil {
+		return nil
 	}
 
-	server := grpc.NewServer()
-	fileSystemService := &FileSystemService{
-		client:         client,
-		fileSystem:     fileSystem,
-		torrentManager: torrentManager,
+	switch node.GetType() {
+	case vfs_node.DirectoryNode:
+		return &vfs_api.Node{
+			Identifier: node.GetIdentifier(),
+			Name:       node.GetName(),
+			Type:       vfs_api.NodeType_DIRECTORY,
+		}
+	case vfs_node.FileNode:
+		return &vfs_api.Node{
+			Identifier: node.GetIdentifier(),
+			Name:       node.GetName(),
+			Type:       vfs_api.NodeType_FILE,
+		}
 	}
 
-	vfs_api.RegisterFileSystemServiceServer(server, fileSystemService)
-
-	return server.Serve(listener)
+	return nil
 }
 
 func (service *FileSystemService) Root(ctx context.Context, req *vfs_api.RootRequest) (*vfs_api.RootResponse, error) {
@@ -69,24 +73,13 @@ func (service *FileSystemService) ReadDirAll(ctx context.Context, req *vfs_api.R
 	var responseNodes []*vfs_api.Node
 
 	for _, node := range nodes {
-		switch node.GetType() {
-		case vfs_node.DirectoryNode:
-			directory := &vfs_api.Node{
-				Identifier: node.GetIdentifier(),
-				Name:       node.GetName(),
-				Type:       vfs_api.NodeType_DIRECTORY,
-			}
+		apiNode := nodeToNode(node)
 
-			responseNodes = append(responseNodes, directory)
-		case vfs_node.FileNode:
-			file := &vfs_api.Node{
-				Identifier: node.GetIdentifier(),
-				Name:       node.GetName(),
-				Type:       vfs_api.NodeType_FILE,
-			}
-
-			responseNodes = append(responseNodes, file)
+		if apiNode == nil {
+			continue
 		}
+
+		responseNodes = append(responseNodes, apiNode)
 	}
 
 	return &vfs_api.ReadDirAllResponse{
@@ -106,30 +99,11 @@ func (service *FileSystemService) Lookup(ctx context.Context, req *vfs_api.Looku
 		return nil, err
 	}
 
-	if node == nil {
-		return nil, nil
+	response := &vfs_api.LookupResponse{
+		Node: nodeToNode(node),
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		return &vfs_api.LookupResponse{
-			Node: &vfs_api.Node{
-				Identifier: node.GetIdentifier(),
-				Name:       node.GetName(),
-				Type:       vfs_api.NodeType_DIRECTORY,
-			},
-		}, nil
-	case vfs_node.FileNode:
-		return &vfs_api.LookupResponse{
-			Node: &vfs_api.Node{
-				Identifier: node.GetIdentifier(),
-				Name:       node.GetName(),
-				Type:       vfs_api.NodeType_FILE,
-			},
-		}, nil
-	}
-
-	return nil, nil
+	return response, nil
 }
 
 func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.RemoveRequest) (*vfs_api.RemoveResponse, error) {
@@ -164,23 +138,23 @@ func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.Remov
 			return nil, err
 		}
 
-		torrentFile, err := service.torrentManager.GetTorrentFileByFile(file)
+		torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
 		if err != nil {
 			return nil, err
 		}
 
-		torrent, err := service.torrentManager.GetTorrentByTorrentFile(torrentFile)
+		torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
 		if err != nil {
 			return nil, err
 		}
 
 		if torrent != nil {
-			transaction, err := service.torrentManager.NewTransaction()
+			transaction, err := service.mediaManager.NewTransaction()
 			if err != nil {
 				return nil, err
 			}
 
-			err = service.torrentManager.DeleteTorrent(transaction, torrent)
+			err = service.mediaManager.DeleteTorrent(transaction, torrent)
 			if err != nil {
 				return nil, err
 			}
@@ -326,7 +300,7 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 		return nil, nil
 	}
 
-	torrentFile, err := service.torrentManager.GetTorrentFileByFile(file)
+	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +328,7 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, nil
 	}
 
-	torrentFile, err := service.torrentManager.GetTorrentFileByFile(file)
+	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
 	if err != nil {
 		return nil, err
 	}

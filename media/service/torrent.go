@@ -1,8 +1,7 @@
-package database
+package service
 
 import (
 	"database/sql"
-	"fmt"
 
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 )
@@ -21,7 +20,7 @@ func (torrent *Torrent) GetTorrentIdentifier() string {
 	return torrent.torrentIdentifier
 }
 
-func (instance *Instance) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {
+func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {
 	query := `
         SELECT EXISTS(SELECT 1 FROM torrents WHERE torrent_id = ?)
     `
@@ -31,13 +30,13 @@ func (instance *Instance) TorrentExists(transaction *sql.Tx, torrentId string) (
 	var exists int
 	err := row.Scan(&exists)
 	if err != nil {
-		return false, fmt.Errorf("Failed to scan data: %v", err)
+		return false, serviceError("Failed to scan data", err)
 	}
 
 	return exists == 1, nil
 }
 
-func (instance *Instance) AddTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) (*Torrent, error) {
+func (mediaService *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) (*Torrent, error) {
 	query := `
         INSERT INTO torrents (torrent_id, name)
         VALUES (?, ?)
@@ -54,13 +53,13 @@ func (instance *Instance) AddTorrent(transaction *sql.Tx, torrent *real_debrid_a
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to scan data: %v", err)
+		return nil, serviceError("Failed to scan data", err)
 	}
 
 	return databaseTorrent, nil
 }
 
-func (instance *Instance) RemoveTorrent(transaction *sql.Tx, torrent *Torrent) error {
+func (mediaService *MediaService) RemoveTorrent(transaction *sql.Tx, torrent *Torrent) error {
 	query := `
         DELETE FROM torrents
         WHERE id = ?;
@@ -68,13 +67,13 @@ func (instance *Instance) RemoveTorrent(transaction *sql.Tx, torrent *Torrent) e
 
 	_, err := transaction.Exec(query, torrent.identifier)
 	if err != nil {
-		return fmt.Errorf("Failed to delete data: %v", err)
+		return serviceError("Failed to delete data", err)
 	}
 
 	return nil
 }
 
-func (instance *Instance) GetTorrentByTorrentFileId(torrentFileIdentifier uint64) (*Torrent, error) {
+func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx, torrentFileIdentifier uint64) (*Torrent, error) {
 	query := `
         SELECT torrents.id, torrents.torrent_id, torrents.name
         FROM torrents
@@ -82,7 +81,7 @@ func (instance *Instance) GetTorrentByTorrentFileId(torrentFileIdentifier uint64
         WHERE torrent_files.id = ?
     `
 
-	row := instance.db.QueryRow(query, torrentFileIdentifier)
+	row := transaction.QueryRow(query, torrentFileIdentifier)
 	torrent := &Torrent{}
 
 	err := row.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
@@ -91,13 +90,13 @@ func (instance *Instance) GetTorrentByTorrentFileId(torrentFileIdentifier uint64
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("Failed to scan data: %v", err)
+		return nil, serviceError("Failed to scan data", err)
 	}
 
 	return torrent, nil
 }
 
-func (instance *Instance) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
+func (mediaService *MediaService) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
 	query := `
         SELECT id, torrent_id, name
         FROM torrents
@@ -105,7 +104,7 @@ func (instance *Instance) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
 
 	rows, err := transaction.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to query data: %v", err)
+		return nil, serviceError("Failed to query data", err)
 	}
 
 	torrents := make([]*Torrent, 0)
@@ -114,7 +113,7 @@ func (instance *Instance) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
 
 		err := rows.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
 		if err != nil {
-			return nil, fmt.Errorf("Failed to scan data: %v", err)
+			return nil, serviceError("Failed to scan data", err)
 		}
 
 		torrents = append(torrents, torrent)

@@ -2,37 +2,49 @@ package poller
 
 import (
 	"database/sql"
-	"debrid_drive/database"
-	"log"
 	"time"
 
-	"debrid_drive/torrent_manager"
+	"debrid_drive/logger"
+
+	media_manager "debrid_drive/media/manager"
+	media_service "debrid_drive/media/service"
+
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
+	"go.uber.org/zap"
 )
 
-type Instance struct {
-	client         *real_debrid.Client
-	torrentManager *torrent_manager.Instance
+type Poller struct {
+	client       *real_debrid.Client
+	mediaManager *media_manager.MediaManager
+	log          *zap.SugaredLogger
 }
 
-func NewInstance(client *real_debrid.Client, torrentManager *torrent_manager.Instance) *Instance {
-	return &Instance{
-		client:         client,
-		torrentManager: torrentManager,
+func NewPoller(client *real_debrid.Client, mediaManager *media_manager.MediaManager) *Poller {
+	log, err := logger.GetLogger("poller.log")
+	if err != nil {
+		log.Fatalf("Failed to get logger: %v", err)
+	}
+
+	return &Poller{
+		client:       client,
+		mediaManager: mediaManager,
+		log:          log,
 	}
 }
 
-func (instance *Instance) Poll() {
+func (instance *Poller) error(message string, err error) {
+	instance.log.Errorf("%s\n%v", message, err)
+}
+
+func (instance *Poller) Poll() {
 	for {
 		torrents, err := real_debrid_api.GetTorrents(instance.client)
 		if err != nil {
-			log.Printf("Failed to get torrents: %v", err)
+			instance.error("Failed to get torrents", err)
 			time.Sleep(30 * time.Second)
 			continue
 		}
-
-		log.Println("Fetched torrents")
 
 		instance.checkNewEntries(*torrents)
 		instance.checkRemovedEntries(*torrents)
@@ -41,50 +53,56 @@ func (instance *Instance) Poll() {
 	}
 }
 
-func (instance *Instance) checkNewEntries(torrents real_debrid_api.Torrents) {
-	transaction, err := instance.torrentManager.NewTransaction()
+func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
+	transaction, err := instance.mediaManager.NewTransaction()
 	if err != nil {
-		log.Fatalf("Failed to begin transaction: %v", err)
+		instance.error("Failed to begin transaction", err)
+		return
 	}
 	defer transaction.Rollback()
 
 	for _, torrent := range torrents {
-		exists, err := instance.torrentManager.TorrentExists(transaction, torrent)
+		exists, err := instance.mediaManager.TorrentExists(transaction, torrent)
 		if err != nil {
-			log.Fatalf("Failed to scan row: %v", err)
+			instance.error("Failed to check if torrent exists", err)
+			return
 		}
 
 		if exists {
 			continue
 		}
 
-		err = instance.torrentManager.AddTorrent(transaction, torrent)
+		err = instance.mediaManager.AddTorrent(transaction, torrent)
 		if err != nil {
-			log.Fatalf("Failed to add new entry: %v", err)
+			instance.error("Failed to add new entry", err)
+			return
 		}
 	}
 
 	err = transaction.Commit()
 	if err != nil {
-		log.Fatalf("Failed to commit transaction: %v", err)
+		instance.error("Failed to commit transaction", err)
+		return
 	}
 }
 
-func (instance *Instance) checkRemovedEntries(torrents real_debrid_api.Torrents) {
+func (instance *Poller) checkRemovedEntries(torrents real_debrid_api.Torrents) {
 	torrentMap := make(map[string]bool)
 	for _, torrent := range torrents {
 		torrentMap[torrent.ID] = true
 	}
 
-	transaction, err := instance.torrentManager.NewTransaction()
+	transaction, err := instance.mediaManager.NewTransaction()
 	if err != nil {
-		log.Fatalf("Failed to begin transaction: %v", err)
+		instance.error("Failed to begin transaction", err)
+		return
 	}
 	defer transaction.Rollback()
 
-	databaseTorrents, err := instance.torrentManager.GetTorrents(transaction)
+	databaseTorrents, err := instance.mediaManager.GetTorrents(transaction)
 	if err != nil {
-		log.Fatalf("Failed to get torrents: %v", err)
+		instance.error("Failed to get torrents", err)
+		return
 	}
 
 	for _, databaseTorrent := range databaseTorrents {
@@ -98,10 +116,11 @@ func (instance *Instance) checkRemovedEntries(torrents real_debrid_api.Torrents)
 
 	err = transaction.Commit()
 	if err != nil {
-		log.Fatalf("Failed to commit transaction: %v", err)
+		instance.error("Failed to commit transaction", err)
+		return
 	}
 }
 
-func (instance *Instance) removeEntry(transaction *sql.Tx, databaseTorrent *database.Torrent) {
-	instance.torrentManager.DeleteTorrent(transaction, databaseTorrent)
+func (instance *Poller) removeEntry(transaction *sql.Tx, databaseTorrent *media_service.Torrent) {
+	instance.mediaManager.DeleteTorrent(transaction, databaseTorrent)
 }

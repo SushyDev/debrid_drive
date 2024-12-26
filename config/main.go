@@ -25,39 +25,39 @@ func get() Config {
 		panic(err)
 	}
 
-    return cfg
+	return cfg
 }
 
 func Validate() {
-    cfg := get()
+	cfg := get()
 
-    if cfg.Port == 0 {
-        panic("Port is not set")
-    }
+	if cfg.Port == 0 {
+		panic("Port is not set")
+	}
 
-    if cfg.ContentType == "" {
-        panic("Content type is not set")
-    }
+	if cfg.ContentType == "" {
+		panic("Content type is not set")
+	}
 
-    if cfg.RealDebridToken == "" {
-        panic("Real Debrid token is not set")
-    }
+	if cfg.RealDebridToken == "" {
+		panic("Real Debrid token is not set")
+	}
 }
 
 func GetPort() int {
-    cfg := get()
+	cfg := get()
 
-    return cfg.Port
+	return cfg.Port
 }
 
 func GetContentType() string {
-    cfg := get()
+	cfg := get()
 
-    return cfg.ContentType
+	return cfg.ContentType
 }
 
 func GetRealDebridToken() string {
-    cfg := get()
+	cfg := get()
 
-    return cfg.RealDebridToken
+	return cfg.RealDebridToken
 }

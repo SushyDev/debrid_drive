@@ -88,3 +88,7 @@ func (instance *Instance) Close() {
 func (instance *Instance) NewTransaction() (*sql.Tx, error) {
 	return instance.db.Begin()
 }
+
+func (instance *Instance) GetDatabase() *sql.DB {
+	return instance.db
+}
