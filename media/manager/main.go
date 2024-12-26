@@ -39,7 +39,7 @@ func managerError(message string, err error) error {
 }
 
 func (instance *MediaManager) GetNewTorrentsDir() (*node.Directory, error) {
-	return instance.fileSystem.FindOrCreateDirectory("torrent_manager", instance.fileSystem.GetRoot())
+	return instance.fileSystem.FindOrCreateDirectory("media_manager", instance.fileSystem.GetRoot())
 }
 
 func (instance *MediaManager) NewTransaction() (*sql.Tx, error) {
