@@ -40,8 +40,8 @@ debrid_drive:
   network_mode: host  # Preferable if using a specific network
   volumes:
     - ./debrid_drive.yml:/app/config.yml  # Bind configuration
-    - ./filesystem.db:/app/file_system.db # Persist DB
-    - ./media.db:/app/torrents.db # Persist DB
+    - ./filesystem.db:/app/filesystem.db # Persist DB
+    - ./media.db:/app/media.db # Persist DB
     - ./logs/debrid_drive:/app/logs  # Store logs
   healthcheck:
     test: ["CMD-SHELL", "curl --fail http://localhost:6969 || exit 1"]

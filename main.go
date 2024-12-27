@@ -25,7 +25,7 @@ func main() {
 		panic(fmt.Sprintf("Failed to create database: %v", err))
 	}
 
-	fileSystem, err := vfs.NewFileSystem("debrid_drive", "./file_system.db")
+	fileSystem, err := vfs.NewFileSystem("debrid_drive", "./filesystem.db")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create file system: %v", err))
 	}
