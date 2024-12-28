@@ -7,7 +7,7 @@ replace github.com/sushydev/real_debrid_go => ../real_debrid_go
 replace github.com/sushydev/vfs_go => ../vfs_go
 
 require (
-	github.com/sushydev/real_debrid_go v1.0.0
+	github.com/sushydev/real_debrid_go v1.0.1
 	github.com/sushydev/vfs_go v1.0.1
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.68.0
