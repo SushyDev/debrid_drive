@@ -30,12 +30,12 @@ Debrid Drive is a fileserver for `fuse_video_stream` that lists your media from 
 
 ### Docker Setup
 
-The image for this project is available on Docker at `ghcr.io/sushydev/debrid_drive:main`. Below is an example of a `docker-compose.yml` file to set up the project:
+The image for this project is available on Docker at `ghcr.io/sushydev/debrid_drive:latest`. Below is an example of a `docker-compose.yml` file to set up the project:
 
 ```yaml
 debrid_drive:
   container_name: debrid_drive
-  image: ghcr.io/sushydev/debrid_drive:main
+  image: ghcr.io/sushydev/debrid_drive:latest
   restart: unless-stopped
   network_mode: host  # Preferable if using a specific network
   volumes:
