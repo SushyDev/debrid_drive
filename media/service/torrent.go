@@ -26,15 +26,15 @@ func (torrent *Torrent) GetName() string {
 
 func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {
 	query := `
-        SELECT EXISTS(SELECT 1 FROM torrents WHERE torrent_id = ?)
-    `
+	SELECT EXISTS(SELECT 1 FROM torrents WHERE torrent_id = ?)
+	`
 
 	row := transaction.QueryRow(query, torrentId)
 
 	var exists int
 	err := row.Scan(&exists)
 	if err != nil {
-		return false, serviceError("Failed to scan data", err)
+		return false, mediaService.error("Failed to scan data", err)
 	}
 
 	return exists == 1, nil
@@ -42,10 +42,10 @@ func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId s
 
 func (mediaService *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) (*Torrent, error) {
 	query := `
-        INSERT INTO torrents (torrent_id, name)
-        VALUES (?, ?)
-        RETURNING id, torrent_id, name;
-    `
+	INSERT INTO torrents (torrent_id, name)
+	VALUES (?, ?)
+	RETURNING id, torrent_id, name;
+	`
 
 	row := transaction.QueryRow(query, torrent.ID, torrent.Filename)
 
@@ -57,7 +57,7 @@ func (mediaService *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_
 	)
 
 	if err != nil {
-		return nil, serviceError("Failed to scan data", err)
+		return nil, mediaService.error("Failed to scan data", err)
 	}
 
 	return databaseTorrent, nil
@@ -65,13 +65,13 @@ func (mediaService *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_
 
 func (mediaService *MediaService) RemoveTorrent(transaction *sql.Tx, torrent *Torrent) error {
 	query := `
-        DELETE FROM torrents
-        WHERE id = ?;
-    `
+	DELETE FROM torrents
+	WHERE id = ?;
+	`
 
 	_, err := transaction.Exec(query, torrent.identifier)
 	if err != nil {
-		return serviceError("Failed to delete data", err)
+		return mediaService.error("Failed to delete data", err)
 	}
 
 	return nil
@@ -79,11 +79,11 @@ func (mediaService *MediaService) RemoveTorrent(transaction *sql.Tx, torrent *To
 
 func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx, torrentFileIdentifier uint64) (*Torrent, error) {
 	query := `
-        SELECT torrents.id, torrents.torrent_id, torrents.name
-        FROM torrents
-        LEFT JOIN torrent_files ON torrents.id = torrent_files.torrent_id
-        WHERE torrent_files.id = ?
-    `
+	SELECT torrents.id, torrents.torrent_id, torrents.name
+	FROM torrents
+	LEFT JOIN torrent_files ON torrents.id = torrent_files.torrent_id
+	WHERE torrent_files.id = ?
+	`
 
 	row := transaction.QueryRow(query, torrentFileIdentifier)
 	torrent := &Torrent{}
@@ -94,7 +94,7 @@ func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx,
 			return nil, nil
 		}
 
-		return nil, serviceError("Failed to scan data", err)
+		return nil, mediaService.error("Failed to scan data", err)
 	}
 
 	return torrent, nil
@@ -102,13 +102,13 @@ func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx,
 
 func (mediaService *MediaService) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
 	query := `
-        SELECT id, torrent_id, name
-        FROM torrents
-    `
+	SELECT id, torrent_id, name
+	FROM torrents
+	`
 
 	rows, err := transaction.Query(query)
 	if err != nil {
-		return nil, serviceError("Failed to query data", err)
+		return nil, mediaService.error("Failed to query data", err)
 	}
 
 	torrents := make([]*Torrent, 0)
@@ -117,7 +117,7 @@ func (mediaService *MediaService) GetTorrents(transaction *sql.Tx) ([]*Torrent, 
 
 		err := rows.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
 		if err != nil {
-			return nil, serviceError("Failed to scan data", err)
+			return nil, mediaService.error("Failed to scan data", err)
 		}
 
 		torrents = append(torrents, torrent)

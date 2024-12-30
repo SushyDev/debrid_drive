@@ -17,10 +17,6 @@ func NewMediaService(database *sql.DB) *MediaService {
 	}
 }
 
-func serviceError(message string, err error) error {
-	if err == nil {
-		return nil
-	}
-
+func (instance *MediaService) error(message string, err error) error {
 	return fmt.Errorf("%s\n%w", message, err)
 }

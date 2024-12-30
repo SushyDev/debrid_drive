@@ -1,6 +1,7 @@
 package poller
 
 import (
+	"fmt"
 	"database/sql"
 	"time"
 
@@ -11,30 +12,30 @@ import (
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	"go.uber.org/zap"
 )
 
 type Poller struct {
 	client       *real_debrid.Client
 	mediaManager *media_manager.MediaManager
-	log          *zap.SugaredLogger
+	logger       *logger.Logger
 }
 
 func NewPoller(client *real_debrid.Client, mediaManager *media_manager.MediaManager) *Poller {
-	log, err := logger.GetLogger("poller.log")
+	logger, err := logger.NewLogger("Poller")
 	if err != nil {
-		log.Fatalf("Failed to get logger: %v", err)
+		logger.Error("Failed to get logger: %v", err)
+		return nil
 	}
 
 	return &Poller{
 		client:       client,
 		mediaManager: mediaManager,
-		log:          log,
+		logger:       logger,
 	}
 }
 
 func (instance *Poller) error(message string, err error) {
-	instance.log.Errorf("%s\n%v", message, err)
+	instance.logger.Error(message, err)
 }
 
 func (instance *Poller) Poll() {
@@ -72,7 +73,7 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 			continue
 		}
 
-		instance.log.Infof("Adding new entry: %s - %s", torrent.ID, torrent.Filename)
+		instance.logger.Info(fmt.Sprintf("Adding entry:	%s - %s", torrent.ID, torrent.Filename))
 
 		err = instance.mediaManager.AddTorrent(transaction, torrent)
 		if err != nil {
@@ -113,7 +114,7 @@ func (instance *Poller) checkRemovedEntries(torrents real_debrid_api.Torrents) {
 			continue
 		}
 
-		instance.log.Infof("Removing entry: %s - %s", databaseTorrent.GetTorrentIdentifier(), databaseTorrent.GetName())
+		instance.logger.Info(fmt.Sprintf("Removing entry:	%s - %s", databaseTorrent.GetTorrentIdentifier(), databaseTorrent.GetName()))
 
 		instance.removeEntry(transaction, databaseTorrent)
 	}

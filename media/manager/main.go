@@ -6,6 +6,7 @@ import (
 
 	"debrid_drive/config"
 	"debrid_drive/database"
+
 	media_service "debrid_drive/media/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
@@ -31,10 +32,6 @@ func NewMediaManager(client *real_debrid.Client, database *database.Instance, fi
 }
 
 func (instance *MediaManager) error(message string, err error) error {
-	if err == nil {
-		return nil
-	}
-
 	return fmt.Errorf("%s\n%w", message, err)
 }
 

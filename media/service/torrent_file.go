@@ -58,7 +58,7 @@ func (mediaService *MediaService) GetTorrentFileByFileId(transaction *sql.Tx, id
 	)
 
 	if err != nil {
-		return nil, serviceError("Failed to scan data", err)
+		return nil, mediaService.error("Failed to scan data", err)
 	}
 
 	return torrentFile, nil
@@ -85,7 +85,7 @@ func (mediaService *MediaService) AddTorrentFile(transaction *sql.Tx, databaseTo
 	)
 
 	if err != nil {
-		return nil, serviceError("Failed to scan data", err)
+		return nil, mediaService.error("Failed to scan data", err)
 	}
 
 	return databaseTorrentFile, nil
@@ -99,7 +99,7 @@ func (mediaService *MediaService) RemoveTorrentFile(transaction *sql.Tx, torrent
 
 	_, err := transaction.Exec(query, torrentFile.identifier)
 	if err != nil {
-		return serviceError("Failed to delete data", err)
+		return mediaService.error("Failed to delete data", err)
 	}
 
 	return nil
@@ -114,7 +114,7 @@ func (mediaService *MediaService) GetTorrentFiles(transaction *sql.Tx, torrent *
 
 	rows, err := transaction.Query(query, torrent.identifier)
 	if err != nil {
-		return nil, serviceError("Failed to query data", err)
+		return nil, mediaService.error("Failed to query data", err)
 	}
 	defer rows.Close()
 
@@ -133,7 +133,7 @@ func (mediaService *MediaService) GetTorrentFiles(transaction *sql.Tx, torrent *
 		)
 
 		if err != nil {
-			return nil, serviceError("Failed to scan data", err)
+			return nil, mediaService.error("Failed to scan data", err)
 		}
 
 		torrentFiles = append(torrentFiles, torrentFile)

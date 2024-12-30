@@ -24,6 +24,16 @@ type FileSystemService struct {
 	mediaManager *media_manager.MediaManager
 }
 
+func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaManager *media_manager.MediaManager) *FileSystemService {
+	return &FileSystemService{
+		client:       client,
+		fileSystem:   fileSystem,
+		mediaManager: mediaManager,
+	}
+}
+
+// fvs_node to vfs_api node
+// TODO: better name
 func nodeToNode(node *vfs_node.Node) *vfs_api.Node {
 	if node == nil {
 		return nil
@@ -50,13 +60,15 @@ func nodeToNode(node *vfs_node.Node) *vfs_api.Node {
 func (service *FileSystemService) Root(ctx context.Context, req *vfs_api.RootRequest) (*vfs_api.RootResponse, error) {
 	root := service.fileSystem.GetRoot()
 
-	return &vfs_api.RootResponse{
+	response := &vfs_api.RootResponse{
 		Root: &vfs_api.Node{
 			Identifier: root.GetIdentifier(),
 			Name:       root.GetName(),
 			Type:       vfs_api.NodeType_DIRECTORY,
 		},
-	}, nil
+	}
+
+	return response, nil
 }
 
 func (service *FileSystemService) ReadDirAll(ctx context.Context, req *vfs_api.ReadDirAllRequest) (*vfs_api.ReadDirAllResponse, error) {
@@ -333,12 +345,14 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, err
 	}
 
-	response, err := real_debrid_api.UnrestrictLink(service.client, torrentFile.GetLink())
+	unrestrictResponse, err := real_debrid_api.UnrestrictLink(service.client, torrentFile.GetLink())
 	if err != nil {
 		return nil, err
 	}
 
-	return &vfs_api.GetVideoUrlResponse{
-		Url: response.Download,
-	}, nil
+	response := &vfs_api.GetVideoUrlResponse{
+		Url: unrestrictResponse.Download,
+	}
+
+	return response, nil
 }
