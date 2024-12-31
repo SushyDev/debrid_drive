@@ -43,39 +43,19 @@ func (instance *MediaManager) NewTransaction() (*sql.Tx, error) {
 	return instance.database.NewTransaction()
 }
 
-func (instance *MediaManager) GetTorrentFileByFile(file *node.File) (*media_service.TorrentFile, error) {
-	transaction, err := instance.database.NewTransaction()
-	if err != nil {
-		return nil, instance.error("Failed to create transaction", err)
-	}
-
+func (instance *MediaManager) GetTorrentFileByFile(transaction *sql.Tx, file *node.File) (*media_service.TorrentFile, error) {
 	torrentFile, err := instance.mediaService.GetTorrentFileByFileId(transaction, file.GetIdentifier())
 	if err != nil {
 		return nil, instance.error("Failed to get torrent file by file id", err)
 	}
 
-	err = transaction.Commit()
-	if err != nil {
-		return nil, instance.error("Failed to commit transaction", err)
-	}
-
 	return torrentFile, nil
 }
 
-func (instance *MediaManager) GetTorrentByTorrentFile(torrentFile *media_service.TorrentFile) (*media_service.Torrent, error) {
-	transaction, err := instance.database.NewTransaction()
-	if err != nil {
-		return nil, instance.error("Failed to create transaction", err)
-	}
-
+func (instance *MediaManager) GetTorrentByTorrentFile(transaction *sql.Tx, torrentFile *media_service.TorrentFile) (*media_service.Torrent, error) {
 	torrent, err := instance.mediaService.GetTorrentByTorrentFileId(transaction, torrentFile.GetIdentifier())
 	if err != nil {
 		return nil, instance.error("Failed to get torrent by torrent file id", err)
-	}
-
-	err = transaction.Commit()
-	if err != nil {
-		return nil, instance.error("Failed to commit transaction", err)
 	}
 
 	return torrent, nil

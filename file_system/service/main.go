@@ -150,12 +150,23 @@ func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.Remov
 			return nil, err
 		}
 
-		torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
+		transaction, err := service.mediaManager.NewTransaction()
+		if err != nil {
+			return nil, err
+		}
+		defer transaction.Rollback()
+
+		torrentFile, err := service.mediaManager.GetTorrentFileByFile(transaction, file)
 		if err != nil {
 			return nil, err
 		}
 
-		torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
+		torrent, err := service.mediaManager.GetTorrentByTorrentFile(transaction, torrentFile)
+		if err != nil {
+			return nil, err
+		}
+
+		err = transaction.Commit()
 		if err != nil {
 			return nil, err
 		}
@@ -312,7 +323,18 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 		return nil, nil
 	}
 
-	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
+	transaction, err := service.mediaManager.NewTransaction()
+	if err != nil {
+		return nil, err
+	}
+	defer transaction.Rollback()
+
+	torrentFile, err := service.mediaManager.GetTorrentFileByFile(transaction, file)
+	if err != nil {
+		return nil, err
+	}
+
+	err = transaction.Commit()
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +362,18 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, nil
 	}
 
-	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
+	transaction, err := service.mediaManager.NewTransaction()
+	if err != nil {
+		return nil, err
+	}
+	defer transaction.Rollback()
+
+	torrentFile, err := service.mediaManager.GetTorrentFileByFile(transaction, file)
+	if err != nil {
+		return nil, err
+	}
+
+	err = transaction.Commit()
 	if err != nil {
 		return nil, err
 	}
