@@ -63,13 +63,17 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 	defer transaction.Rollback()
 
 	for _, torrent := range torrents {
-		exists, err := instance.mediaManager.TorrentExists(transaction, torrent)
+		exists, err := instance.mediaManager.TorrentExists(torrent)
 		if err != nil {
 			instance.error("Failed to check if torrent exists", err)
 			return
 		}
 
 		if exists {
+			continue
+		}
+
+		if torrent.Status != "downloaded" {
 			continue
 		}
 
@@ -102,7 +106,7 @@ func (instance *Poller) checkRemovedEntries(torrents real_debrid_api.Torrents) {
 	}
 	defer transaction.Rollback()
 
-	databaseTorrents, err := instance.mediaManager.GetTorrents(transaction)
+	databaseTorrents, err := instance.mediaManager.GetTorrents()
 	if err != nil {
 		instance.error("Failed to get torrents", err)
 		return

@@ -43,8 +43,8 @@ func (instance *MediaManager) NewTransaction() (*sql.Tx, error) {
 	return instance.database.NewTransaction()
 }
 
-func (instance *MediaManager) GetTorrentFileByFile(transaction *sql.Tx, file *node.File) (*media_service.TorrentFile, error) {
-	torrentFile, err := instance.mediaService.GetTorrentFileByFileId(transaction, file.GetIdentifier())
+func (instance *MediaManager) GetTorrentFileByFile(file *node.File) (*media_service.TorrentFile, error) {
+	torrentFile, err := instance.mediaService.GetTorrentFileByFileId(file.GetIdentifier())
 	if err != nil {
 		return nil, instance.error("Failed to get torrent file by file id", err)
 	}
@@ -52,8 +52,8 @@ func (instance *MediaManager) GetTorrentFileByFile(transaction *sql.Tx, file *no
 	return torrentFile, nil
 }
 
-func (instance *MediaManager) GetTorrentByTorrentFile(transaction *sql.Tx, torrentFile *media_service.TorrentFile) (*media_service.Torrent, error) {
-	torrent, err := instance.mediaService.GetTorrentByTorrentFileId(transaction, torrentFile.GetIdentifier())
+func (instance *MediaManager) GetTorrentByTorrentFile(torrentFile *media_service.TorrentFile) (*media_service.Torrent, error) {
+	torrent, err := instance.mediaService.GetTorrentByTorrentFileId(torrentFile.GetIdentifier())
 	if err != nil {
 		return nil, instance.error("Failed to get torrent by torrent file id", err)
 	}
@@ -61,8 +61,8 @@ func (instance *MediaManager) GetTorrentByTorrentFile(transaction *sql.Tx, torre
 	return torrent, nil
 }
 
-func (instance *MediaManager) TorrentExists(transaction *sql.Tx, torrent *real_debrid_api.Torrent) (bool, error) {
-	return instance.mediaService.TorrentExists(transaction, torrent.ID)
+func (instance *MediaManager) TorrentExists(torrent *real_debrid_api.Torrent) (bool, error) {
+	return instance.mediaService.TorrentExists(torrent.ID)
 }
 
 // 1. Create directory for torrent
@@ -91,6 +91,12 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		return instance.error("Failed to get torrent info", err)
 	}
 
+	if len(torrentInfo.Files) > len(torrentInfo.Links) {
+		err := fmt.Errorf("Torrent has more files than links (Most likely an archive) Files: %d, Links: %d", len(torrentInfo.Files), len(torrentInfo.Links))
+
+		return instance.error("Rejected", err)
+	}
+
 	skippedFiles := 0
 	for index, torrentFile := range torrentInfo.Files {
 		if torrentFile.Selected == 0 {
@@ -99,11 +105,10 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		}
 
 		name := torrentFile.Path[1:]
-
 		linkIndex := index - skippedFiles
 
 		if linkIndex >= len(torrentInfo.Links) {
-			return instance.error("Failed to get link", nil)
+			return instance.error("Link index out of bounds", nil)
 		}
 
 		link := torrentInfo.Links[linkIndex]
@@ -148,7 +153,7 @@ func (instance *MediaManager) DeleteTorrent(transaction *sql.Tx, torrent *media_
 
 // Removes from database and file system
 func (instance *MediaManager) removeTorrentFiles(transaction *sql.Tx, databaseTorrent *media_service.Torrent) error {
-	torrentFiles, err := instance.mediaService.GetTorrentFiles(transaction, databaseTorrent)
+	torrentFiles, err := instance.mediaService.GetTorrentFiles(databaseTorrent)
 	if err != nil {
 		return instance.error("Failed to get torrent files", err)
 	}
@@ -185,6 +190,6 @@ func (instance *MediaManager) removeTorrentFromApi(torrent *media_service.Torren
 	return real_debrid_api.Delete(instance.client, torrent.GetTorrentIdentifier())
 }
 
-func (instance *MediaManager) GetTorrents(transaction *sql.Tx) ([]*media_service.Torrent, error) {
-	return instance.mediaService.GetTorrents(transaction)
+func (instance *MediaManager) GetTorrents() ([]*media_service.Torrent, error) {
+	return instance.mediaService.GetTorrents()
 }

@@ -37,14 +37,14 @@ func (torrentFile *TorrentFile) GetFileIdentifier() uint64 {
 	return torrentFile.fsNodeIdentifier
 }
 
-func (mediaService *MediaService) GetTorrentFileByFileId(transaction *sql.Tx, identifier uint64) (*TorrentFile, error) {
+func (mediaService *MediaService) GetTorrentFileByFileId(identifier uint64) (*TorrentFile, error) {
 	query := `
-        SELECT id, torrent_id, path, size, link, file_index, file_node_id
-        FROM torrent_files
-        WHERE file_node_id = ?;
-    `
+	SELECT id, torrent_id, path, size, link, file_index, file_node_id
+	FROM torrent_files
+	WHERE file_node_id = ?;
+	`
 
-	row := transaction.QueryRow(query, identifier)
+	row := mediaService.database.QueryRow(query, identifier)
 
 	torrentFile := &TorrentFile{}
 	err := row.Scan(
@@ -66,10 +66,10 @@ func (mediaService *MediaService) GetTorrentFileByFileId(transaction *sql.Tx, id
 
 func (mediaService *MediaService) AddTorrentFile(transaction *sql.Tx, databaseTorrent *Torrent, torrentFile real_debrid_api.TorrentFile, fileNode *node.File, link string, index int) (*TorrentFile, error) {
 	query := `
-        INSERT INTO torrent_files (torrent_id, path, size, link, file_index, file_node_id)
-        VALUES (?, ?, ?, ?, ?, ?)
-        RETURNING id, torrent_id, path, size, link, file_index, file_node_id;
-    `
+	INSERT INTO torrent_files (torrent_id, path, size, link, file_index, file_node_id)
+	VALUES (?, ?, ?, ?, ?, ?)
+	RETURNING id, torrent_id, path, size, link, file_index, file_node_id;
+	`
 
 	row := transaction.QueryRow(query, databaseTorrent.identifier, torrentFile.Path, torrentFile.Bytes, link, index, fileNode.GetIdentifier())
 
@@ -93,9 +93,9 @@ func (mediaService *MediaService) AddTorrentFile(transaction *sql.Tx, databaseTo
 
 func (mediaService *MediaService) RemoveTorrentFile(transaction *sql.Tx, torrentFile *TorrentFile) error {
 	query := `
-        DELETE FROM torrent_files
-        WHERE id = ?;
-    `
+	DELETE FROM torrent_files
+	WHERE id = ?;
+	`
 
 	_, err := transaction.Exec(query, torrentFile.identifier)
 	if err != nil {
@@ -105,14 +105,14 @@ func (mediaService *MediaService) RemoveTorrentFile(transaction *sql.Tx, torrent
 	return nil
 }
 
-func (mediaService *MediaService) GetTorrentFiles(transaction *sql.Tx, torrent *Torrent) ([]*TorrentFile, error) {
+func (mediaService *MediaService) GetTorrentFiles(torrent *Torrent) ([]*TorrentFile, error) {
 	query := `
-        SELECT id, torrent_id, path, size, link, file_index, file_node_id
-        FROM torrent_files
-        WHERE torrent_id = ?
-    `
+	SELECT id, torrent_id, path, size, link, file_index, file_node_id
+	FROM torrent_files
+	WHERE torrent_id = ?
+	`
 
-	rows, err := transaction.Query(query, torrent.identifier)
+	rows, err := mediaService.database.Query(query, torrent.identifier)
 	if err != nil {
 		return nil, mediaService.error("Failed to query data", err)
 	}

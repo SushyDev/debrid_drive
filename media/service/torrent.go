@@ -24,12 +24,12 @@ func (torrent *Torrent) GetName() string {
 	return torrent.name
 }
 
-func (mediaService *MediaService) TorrentExists(transaction *sql.Tx, torrentId string) (bool, error) {
+func (mediaService *MediaService) TorrentExists(torrentId string) (bool, error) {
 	query := `
 	SELECT EXISTS(SELECT 1 FROM torrents WHERE torrent_id = ?)
 	`
 
-	row := transaction.QueryRow(query, torrentId)
+	row := mediaService.database.QueryRow(query, torrentId)
 
 	var exists int
 	err := row.Scan(&exists)
@@ -77,7 +77,7 @@ func (mediaService *MediaService) RemoveTorrent(transaction *sql.Tx, torrent *To
 	return nil
 }
 
-func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx, torrentFileIdentifier uint64) (*Torrent, error) {
+func (mediaService *MediaService) GetTorrentByTorrentFileId(torrentFileIdentifier uint64) (*Torrent, error) {
 	query := `
 	SELECT torrents.id, torrents.torrent_id, torrents.name
 	FROM torrents
@@ -85,7 +85,7 @@ func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx,
 	WHERE torrent_files.id = ?
 	`
 
-	row := transaction.QueryRow(query, torrentFileIdentifier)
+	row := mediaService.database.QueryRow(query, torrentFileIdentifier)
 	torrent := &Torrent{}
 
 	err := row.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
@@ -100,13 +100,13 @@ func (mediaService *MediaService) GetTorrentByTorrentFileId(transaction *sql.Tx,
 	return torrent, nil
 }
 
-func (mediaService *MediaService) GetTorrents(transaction *sql.Tx) ([]*Torrent, error) {
+func (mediaService *MediaService) GetTorrents() ([]*Torrent, error) {
 	query := `
 	SELECT id, torrent_id, name
 	FROM torrents
 	`
 
-	rows, err := transaction.Query(query)
+	rows, err := mediaService.database.Query(query)
 	if err != nil {
 		return nil, mediaService.error("Failed to query data", err)
 	}
