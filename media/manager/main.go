@@ -91,27 +91,29 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		return instance.error("Failed to get torrent info", err)
 	}
 
-	if len(torrentInfo.Files) > len(torrentInfo.Links) {
+	selectedFiles := make([]real_debrid_api.TorrentFile, 0)
+	for _, torrentFile := range torrentInfo.Files {
+		if torrentFile.Selected != 1 {
+			continue
+		}
+
+		selectedFiles = append(selectedFiles, torrentFile)
+	}
+
+	if len(selectedFiles) > len(torrentInfo.Links) {
 		err := fmt.Errorf("Torrent has more files than links (Most likely an archive) Files: %d, Links: %d", len(torrentInfo.Files), len(torrentInfo.Links))
 
 		return instance.error("Rejected", err)
 	}
 
-	skippedFiles := 0
-	for index, torrentFile := range torrentInfo.Files {
-		if torrentFile.Selected == 0 {
-			skippedFiles++
-			continue
-		}
-
+	for index, torrentFile := range selectedFiles {
 		name := torrentFile.Path[1:]
-		linkIndex := index - skippedFiles
 
-		if linkIndex >= len(torrentInfo.Links) {
+		if index >= len(torrentInfo.Links) {
 			return instance.error("Link index out of bounds", nil)
 		}
 
-		link := torrentInfo.Links[linkIndex]
+		link := torrentInfo.Links[index]
 
 		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, config.GetContentType(), "")
 		if err != nil {
