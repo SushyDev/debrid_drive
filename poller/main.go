@@ -82,7 +82,7 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 		err = instance.mediaManager.AddTorrent(transaction, torrent)
 		if err != nil {
 			instance.error("Failed to add new entry", err)
-			return
+			continue
 		}
 	}
 

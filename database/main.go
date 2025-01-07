@@ -78,6 +78,21 @@ func initializeDatabase() (*sql.DB, error) {
 		return nil, fmt.Errorf("Failed to create table: %v", err)
 	}
 
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS rejected_torrents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			torrent_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+				
+			UNIQUE(torrent_id)
+		);
+	`)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create table: %v", err)
+	}
+
+
 	return db, nil
 }
 

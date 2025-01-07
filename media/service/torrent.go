@@ -77,6 +77,24 @@ func (mediaService *MediaService) RemoveTorrent(transaction *sql.Tx, torrent *To
 	return nil
 }
 
+func (mediaService *MediaService) RejectTorrent(transaction *sql.Tx, torrent *real_debrid_api.Torrent) error {
+	query := `
+	INSERT INTO rejected_torrents (torrent_id, name)
+	VALUES (?, ?)
+	RETURNING id;
+	`
+
+	row := transaction.QueryRow(query, torrent.ID, torrent.Filename)
+
+	var identifier uint64
+	err := row.Scan(&identifier)
+	if err != nil {
+		return mediaService.error("Failed to scan data", err)
+	}
+
+	return nil
+}
+
 func (mediaService *MediaService) GetTorrentByTorrentFileId(torrentFileIdentifier uint64) (*Torrent, error) {
 	query := `
 	SELECT torrents.id, torrents.torrent_id, torrents.name

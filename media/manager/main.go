@@ -102,6 +102,10 @@ func (instance *MediaManager) AddTorrent(transaction *sql.Tx, torrent *real_debr
 
 	if len(selectedFiles) > len(torrentInfo.Links) {
 		err := fmt.Errorf("Torrent has more files than links (Most likely an archive) Files: %d, Links: %d", len(torrentInfo.Files), len(torrentInfo.Links))
+		rejectErr := instance.mediaService.RejectTorrent(transaction, torrent)
+		if rejectErr != nil {
+			return instance.error("Torrent got rejected but failed", rejectErr)
+		}
 
 		return instance.error("Rejected", err)
 	}
