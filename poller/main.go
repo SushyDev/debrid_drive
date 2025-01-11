@@ -77,6 +77,11 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 			continue
 		}
 
+		// No files selected
+		if torrent.Bytes == 0 {
+			continue
+		}
+
 		instance.logger.Info(fmt.Sprintf("Adding entry:	%s - %s", torrent.ID, torrent.Filename))
 
 		err = instance.mediaManager.AddTorrent(transaction, torrent)
