@@ -7,9 +7,10 @@ import (
 )
 
 type Config struct {
-	Port            int    `yaml:"port"`
-	ContentType     string `yaml:"content_type"`
-	RealDebridToken string `yaml:"real_debrid_token"`
+	Port                int    `yaml:"port"`
+	ContentType         string `yaml:"content_type"`
+	RealDebridToken     string `yaml:"real_debrid_token"`
+	UseFilenameInLister bool   `yaml:"use_filename_in_lister"`
 }
 
 func get() Config {
@@ -60,4 +61,10 @@ func GetRealDebridToken() string {
 	cfg := get()
 
 	return cfg.RealDebridToken
+}
+
+func GetUseFilenameInLister() bool {
+	cfg := get()
+
+	return cfg.UseFilenameInLister
 }

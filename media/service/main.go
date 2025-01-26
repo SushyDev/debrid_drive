@@ -103,7 +103,15 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		return err
 	}
 
-	directory, err := instance.fileSystem.FindOrCreateDirectory(torrent.ID, managerDirectory)
+	var torrentDirectory string
+
+	if config.GetUseFilenameInLister() {
+		torrentDirectory = torrent.Filename
+	} else {
+		torrentDirectory = torrent.ID
+	}
+
+	directory, err := instance.fileSystem.FindOrCreateDirectory(torrentDirectory, managerDirectory)
 	if err != nil {
 		instance.logger.Error("Failed to create directory", err)
 		return err
