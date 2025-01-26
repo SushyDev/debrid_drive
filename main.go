@@ -5,8 +5,8 @@ import (
 	"debrid_drive/database"
 	"debrid_drive/logger"
 	file_system_server "debrid_drive/file_system/server"
-	media_manager "debrid_drive/media/manager"
 	media_service "debrid_drive/media/service"
+	media_repository "debrid_drive/media/repository"
 	"debrid_drive/poller"
 
 	"github.com/sushydev/real_debrid_go"
@@ -38,12 +38,15 @@ func main() {
 		panic(err)
 	}
 
-	mediaService := media_service.NewMediaService(database.GetDatabase())
-	mediaManager := media_manager.NewMediaManager(client, database, fileSystem, mediaService)
+	mediaService := media_repository.NewMediaService(database.GetDatabase())
+	mediaManager := media_service.NewMediaService(client, database, fileSystem, mediaService)
 	fileSystemServer := file_system_server.NewFileSystemServer(client, fileSystem, mediaManager)
 
-	go fileSystemServer.Serve()
+	fileSystemServerReady := make(chan struct{})
+	go fileSystemServer.Serve(fileSystemServerReady)
+	<-fileSystemServerReady
 
 	poller := poller.NewPoller(client, mediaManager)
 	poller.Poll()
+	poller.Cron()
 }

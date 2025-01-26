@@ -1,4 +1,4 @@
-package service
+package repository
 
 import (
 	"database/sql"
@@ -37,7 +37,7 @@ func (torrentFile *TorrentFile) GetFileIdentifier() uint64 {
 	return torrentFile.fsNodeIdentifier
 }
 
-func (mediaService *MediaService) GetTorrentFileByFileId(identifier uint64) (*TorrentFile, error) {
+func (mediaService *MediaRepository) GetTorrentFileByFileId(identifier uint64) (*TorrentFile, error) {
 	query := `
 	SELECT id, torrent_id, path, size, link, file_index, file_node_id
 	FROM torrent_files
@@ -64,7 +64,7 @@ func (mediaService *MediaService) GetTorrentFileByFileId(identifier uint64) (*To
 	return torrentFile, nil
 }
 
-func (mediaService *MediaService) AddTorrentFile(transaction *sql.Tx, databaseTorrent *Torrent, torrentFile real_debrid_api.TorrentFile, fileNode *node.File, link string, index int) (*TorrentFile, error) {
+func (mediaService *MediaRepository) AddTorrentFile(transaction *sql.Tx, databaseTorrent *Torrent, torrentFile real_debrid_api.TorrentFile, fileNode *node.File, link string, index int) (*TorrentFile, error) {
 	query := `
 	INSERT INTO torrent_files (torrent_id, path, size, link, file_index, file_node_id)
 	VALUES (?, ?, ?, ?, ?, ?)
@@ -91,7 +91,7 @@ func (mediaService *MediaService) AddTorrentFile(transaction *sql.Tx, databaseTo
 	return databaseTorrentFile, nil
 }
 
-func (mediaService *MediaService) RemoveTorrentFile(transaction *sql.Tx, torrentFile *TorrentFile) error {
+func (mediaService *MediaRepository) RemoveTorrentFile(transaction *sql.Tx, torrentFile *TorrentFile) error {
 	query := `
 	DELETE FROM torrent_files
 	WHERE id = ?;
@@ -105,7 +105,7 @@ func (mediaService *MediaService) RemoveTorrentFile(transaction *sql.Tx, torrent
 	return nil
 }
 
-func (mediaService *MediaService) GetTorrentFiles(torrent *Torrent) ([]*TorrentFile, error) {
+func (mediaService *MediaRepository) GetTorrentFiles(torrent *Torrent) ([]*TorrentFile, error) {
 	query := `
 	SELECT id, torrent_id, path, size, link, file_index, file_node_id
 	FROM torrent_files

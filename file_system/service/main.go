@@ -6,7 +6,7 @@ import (
 	"debrid_drive/config"
 	"debrid_drive/vfs_api"
 
-	media_manager "debrid_drive/media/manager"
+	media_service "debrid_drive/media/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
@@ -21,14 +21,14 @@ type FileSystemService struct {
 
 	client       *real_debrid.Client
 	fileSystem   *vfs.FileSystem
-	mediaManager *media_manager.MediaManager
+	mediaManager *media_service.MediaService
 }
 
-func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaManager *media_manager.MediaManager) *FileSystemService {
+func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaService *media_service.MediaService) *FileSystemService {
 	return &FileSystemService{
 		client:       client,
 		fileSystem:   fileSystem,
-		mediaManager: mediaManager,
+		mediaManager: mediaService,
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"debrid_drive/logger"
 	"debrid_drive/vfs_api"
 
-	media_manager "debrid_drive/media/manager"
+	media_service "debrid_drive/media/service"
 	file_system_service "debrid_drive/file_system/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
@@ -21,7 +21,7 @@ type FileSystemServer struct {
 	logger *logger.Logger
 }
 
-func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaManager *media_manager.MediaManager) *FileSystemServer {
+func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaService *media_service.MediaService) *FileSystemServer {
 	logger, err := logger.NewLogger("File System Server")
 	if err != nil {
 		panic(err)
@@ -29,7 +29,7 @@ func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem,
 
 	server := grpc.NewServer()
 
-	fileSystemService := file_system_service.NewFileSystemService(client, fileSystem, mediaManager)
+	fileSystemService := file_system_service.NewFileSystemService(client, fileSystem, mediaService)
 
 	vfs_api.RegisterFileSystemServiceServer(server, fileSystemService)
 
@@ -41,7 +41,7 @@ func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem,
 	return fileSystemServer
 }
 
-func (server *FileSystemServer) Serve()  {
+func (server *FileSystemServer) Serve(ready chan struct{}) {
 	port := config.GetPort()
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -51,6 +51,7 @@ func (server *FileSystemServer) Serve()  {
 	}
 
 	server.info(fmt.Sprintf("Listening on port %d", port))
+	close(ready)
 
 	err = server.server.Serve(listener)
 	if err != nil {
