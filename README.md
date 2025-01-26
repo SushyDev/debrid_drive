@@ -78,6 +78,9 @@ content_type: "application/debrid-drive"
 
 # Your Real Debrid API token
 real_debrid_token: ""
+
+# use_filename_in_lister: true # Use debrid "filename" as directory name
+# poll_interval_seconds: 60 # Time inbetween polls for changes on debrid
 ```
 
 #### Done

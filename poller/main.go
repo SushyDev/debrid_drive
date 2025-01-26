@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"debrid_drive/config"
 	"debrid_drive/logger"
 
 	media_repository "debrid_drive/media/repository"
@@ -34,8 +35,10 @@ func NewPoller(client *real_debrid.Client, mediaService *media_service.MediaServ
 }
 
 func (instance *Poller) Cron() {
+	interval := config.GetPollIntervalSeconds()
+
 	for {
-		<-time.After(30 * time.Second)
+		<-time.After(interval)
 
 		err := instance.Poll()
 		if err != nil {

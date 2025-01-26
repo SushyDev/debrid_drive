@@ -2,13 +2,15 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Port                int    `yaml:"port"`
 	ContentType         string `yaml:"content_type"`
+	PollIntervalSeconds int    `yaml:"poll_interval_seconds"`
+	Port                int    `yaml:"port"`
 	RealDebridToken     string `yaml:"real_debrid_token"`
 	UseFilenameInLister bool   `yaml:"use_filename_in_lister"`
 }
@@ -45,16 +47,26 @@ func Validate() {
 	}
 }
 
-func GetPort() int {
-	cfg := get()
-
-	return cfg.Port
-}
-
 func GetContentType() string {
 	cfg := get()
 
 	return cfg.ContentType
+}
+
+func GetPollIntervalSeconds() time.Duration {
+	cfg := get()
+
+	if cfg.PollIntervalSeconds == 0 {
+		return 60 * time.Second
+	}
+
+	return time.Duration(cfg.PollIntervalSeconds) * time.Second
+}
+
+func GetPort() int {
+	cfg := get()
+
+	return cfg.Port
 }
 
 func GetRealDebridToken() string {
