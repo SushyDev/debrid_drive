@@ -2,6 +2,7 @@ package file_system_server
 
 import (
 	context "context"
+	"fmt"
 
 	"debrid_drive/config"
 	"debrid_drive/vfs_api"
@@ -34,9 +35,9 @@ func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem
 
 // fvs_node to vfs_api node
 // TODO: better name
-func nodeToNode(node *vfs_node.Node) *vfs_api.Node {
+func nodeToNode(node *vfs_node.Node) (*vfs_api.Node, error) {
 	if node == nil {
-		return nil
+		return nil, fmt.Errorf("node is nil")
 	}
 
 	switch node.GetType() {
@@ -45,16 +46,16 @@ func nodeToNode(node *vfs_node.Node) *vfs_api.Node {
 			Identifier: node.GetIdentifier(),
 			Name:       node.GetName(),
 			Type:       vfs_api.NodeType_DIRECTORY,
-		}
+		}, nil
 	case vfs_node.FileNode:
 		return &vfs_api.Node{
 			Identifier: node.GetIdentifier(),
 			Name:       node.GetName(),
 			Type:       vfs_api.NodeType_FILE,
-		}
+		}, nil
 	}
 
-	return nil
+	return nil, fmt.Errorf("unknown node type")
 }
 
 func (service *FileSystemService) Root(ctx context.Context, req *vfs_api.RootRequest) (*vfs_api.RootResponse, error) {
@@ -85,7 +86,10 @@ func (service *FileSystemService) ReadDirAll(ctx context.Context, req *vfs_api.R
 	var responseNodes []*vfs_api.Node
 
 	for _, node := range nodes {
-		apiNode := nodeToNode(node)
+		apiNode, err := nodeToNode(node)
+		if err != nil {
+			continue
+		}
 
 		if apiNode == nil {
 			continue
@@ -111,8 +115,13 @@ func (service *FileSystemService) Lookup(ctx context.Context, req *vfs_api.Looku
 		return nil, err
 	}
 
+	usableNode, err := nodeToNode(node)
+	if err != nil {
+		return nil, err
+	}
+
 	response := &vfs_api.LookupResponse{
-		Node: nodeToNode(node),
+		Node: usableNode,
 	}
 
 	return response, nil

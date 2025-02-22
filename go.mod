@@ -1,6 +1,6 @@
 module debrid_drive
 
-go 1.23.2
+go 1.24.0
 
 replace github.com/sushydev/real_debrid_go => ../real_debrid_go
 
