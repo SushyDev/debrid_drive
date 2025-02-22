@@ -44,7 +44,13 @@ func (instance *GarbageCleaner) Poll() error {
 	instance.logger.Info("Garbage cleaner started")
 
 	root := instance.fileSystem.GetRoot()
-	instance.cleanEmptyDirectories(root)
+	mediaManager, err := instance.fileSystem.FindOrCreateDirectory("media_manager", root)
+	if err != nil {
+		instance.logger.Error("Failed to get media manager directory", err)
+		return err
+	}
+
+	instance.cleanEmptyDirectories(mediaManager)
 
 	instance.logger.Info("Garbage cleaner complete")
 
@@ -78,13 +84,13 @@ func (instance *GarbageCleaner) cleanEmptyDirectories(directory *vfs_node.Direct
 		if len(childNodes) > 0 {
 			instance.cleanEmptyDirectories(directory)
 
-			childNodes, err = instance.fileSystem.GetChildNodes(directory)
+			newChildNodes, err := instance.fileSystem.GetChildNodes(directory)
 			if err != nil {
 				instance.logger.Error("Failed to get child nodes", err)
 				continue
 			}
 
-			if len(childNodes) > 0 {
+			if len(newChildNodes) > 0 {
 				continue
 			}
 		}

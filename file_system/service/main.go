@@ -37,7 +37,7 @@ func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem
 // TODO: better name
 func nodeToNode(node *vfs_node.Node) (*vfs_api.Node, error) {
 	if node == nil {
-		return nil, fmt.Errorf("node is nil")
+		return nil, nil
 	}
 
 	switch node.GetType() {
@@ -115,13 +115,17 @@ func (service *FileSystemService) Lookup(ctx context.Context, req *vfs_api.Looku
 		return nil, err
 	}
 
-	usableNode, err := nodeToNode(node)
+	apiNode, err := nodeToNode(node)
 	if err != nil {
 		return nil, err
 	}
 
+	if apiNode == nil {
+		return nil, nil
+	}
+
 	response := &vfs_api.LookupResponse{
-		Node: usableNode,
+		Node: apiNode,
 	}
 
 	return response, nil
