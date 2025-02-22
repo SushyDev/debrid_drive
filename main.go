@@ -8,6 +8,7 @@ import (
 	media_service "debrid_drive/media/service"
 	media_repository "debrid_drive/media/repository"
 	"debrid_drive/poller"
+	"debrid_drive/garbage_cleaner"
 
 	"github.com/sushydev/real_debrid_go"
 	vfs "github.com/sushydev/vfs_go"
@@ -46,6 +47,12 @@ func main() {
 	go fileSystemServer.Serve(fileSystemServerReady)
 	<-fileSystemServerReady
 
+	// Init garbage cleaner
+	garbageCleaner := garbage_cleaner.NewGarbageCleaner(fileSystem)
+	garbageCleaner.Poll()
+	go garbageCleaner.Cron()
+
+	// Init poller
 	poller := poller.NewPoller(client, mediaManager)
 	poller.Poll()
 	poller.Cron()

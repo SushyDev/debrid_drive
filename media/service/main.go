@@ -229,6 +229,26 @@ func (instance *MediaService) removeTorrentFiles(transaction *sql.Tx, databaseTo
 			instance.logger.Error("Failed to delete file", err)
 			return err
 		}
+
+		parentDirectory, err := instance.fileSystem.GetDirectory(*vfsFile.GetNode().GetParentIdentifier())
+		if err != nil {
+			instance.logger.Error("Failed to get parent directory", err)
+			continue
+		}
+
+		childNodes, err := instance.fileSystem.GetChildNodes(parentDirectory)
+		if err != nil {
+			instance.logger.Error("Failed to get child nodes", err)
+			continue
+		}
+
+		if len(childNodes) == 0 {
+			err = instance.fileSystem.DeleteDirectory(parentDirectory)
+			if err != nil {
+				instance.logger.Error("Failed to delete parent directory", err)
+				continue
+			}
+		}
 	}
 
 	return nil
