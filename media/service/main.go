@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"syscall"
 	"fmt"
 
 	"debrid_drive/config"
@@ -12,14 +13,14 @@ import (
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	vfs "github.com/sushydev/vfs_go"
-	"github.com/sushydev/vfs_go/node"
+	"github.com/sushydev/vfs_go/filesystem"
+	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
 )
 
 type MediaService struct {
 	client          *real_debrid.Client
 	database        *database.Instance
-	fileSystem      *vfs.FileSystem
+	fileSystem      *filesystem.FileSystem
 	mediaRepository *media_repository.MediaRepository
 	logger          *logger.Logger
 }
@@ -28,14 +29,18 @@ type MediaService struct {
 
 var _ error = TorrentRejectedError{}
 
-type TorrentRejectedError struct {}
+type TorrentRejectedError struct{}
 
 func (TorrentRejectedError) Error() string {
 	return "Rejected"
 }
 
-
-func NewMediaService(client *real_debrid.Client, database *database.Instance, fileSystem *vfs.FileSystem, mediaRepository *media_repository.MediaRepository) *MediaService {
+func NewMediaService(
+	client *real_debrid.Client,
+	database *database.Instance,
+	fileSystem *filesystem.FileSystem,
+	mediaRepository *media_repository.MediaRepository,
+) *MediaService {
 	logger, err := logger.NewLogger("Media Service")
 	if err != nil {
 		panic(err)
@@ -55,8 +60,21 @@ func (instance *MediaService) error(message string, err error) error {
 	return fmt.Errorf("%s\n%w", message, err)
 }
 
-func (instance *MediaService) GetManagerDirectory() (*node.Directory, error) {
-	return instance.fileSystem.FindOrCreateDirectory("media_manager", instance.fileSystem.GetRoot())
+func (instance *MediaService) GetManagerDirectory() (filesystem_interfaces.Node, error) {
+	mediaManager, err := instance.fileSystem.Find("media_manager")
+	switch err {
+		case syscall.ENOENT:
+			instance.logger.Info("Creating new media manager directory")
+			return instance.fileSystem.CreateDirectory("media_manager", instance.fileSystem.Root())
+		case nil:
+			return mediaManager, nil
+		default:
+			return nil, instance.error("Failed to find media manager directory", err)
+	}
+			
+
+
+	return instance.fileSystem.FindOrCreateDirectory("media_manager", instance.fileSystem.Root())
 }
 
 func (instance *MediaService) NewTransaction() (*sql.Tx, error) {

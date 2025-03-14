@@ -6,13 +6,13 @@ import (
 
 	"debrid_drive/config"
 	"debrid_drive/logger"
-	"debrid_drive/vfs_api"
+	api "github.com/sushydev/stream_mount_api"
 
 	media_service "debrid_drive/media/service"
 	file_system_service "debrid_drive/file_system/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
-	vfs "github.com/sushydev/vfs_go"
+	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
 	grpc "google.golang.org/grpc"
 )
 
@@ -21,7 +21,7 @@ type FileSystemServer struct {
 	logger *logger.Logger
 }
 
-func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaService *media_service.MediaService) *FileSystemServer {
+func NewFileSystemServer(client *real_debrid.Client, fileSystem filesystem_interfaces.FileSystem, mediaService *media_service.MediaService) *FileSystemServer {
 	logger, err := logger.NewLogger("File System Server")
 	if err != nil {
 		panic(err)
@@ -31,7 +31,7 @@ func NewFileSystemServer(client *real_debrid.Client, fileSystem *vfs.FileSystem,
 
 	fileSystemService := file_system_service.NewFileSystemService(client, fileSystem, mediaService)
 
-	vfs_api.RegisterFileSystemServiceServer(server, fileSystemService)
+	api.RegisterFileSystemServiceServer(server, fileSystemService)
 
 	fileSystemServer := &FileSystemServer{
 		server: server,

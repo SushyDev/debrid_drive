@@ -2,12 +2,10 @@ module debrid_drive
 
 go 1.24.0
 
-replace github.com/sushydev/real_debrid_go => ../real_debrid_go
-
 replace github.com/sushydev/vfs_go => ../vfs_go
+replace github.com/sushydev/stream_mount_api => ../stream_mount_api
 
 require (
-	github.com/sushydev/real_debrid_go v1.0.1
 	github.com/sushydev/vfs_go v1.0.1
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.68.0
@@ -23,6 +21,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/sushydev/real_debrid_go v1.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20241217172543-b2144cdd0a67 // indirect
 	golang.org/x/net v0.31.0 // indirect
