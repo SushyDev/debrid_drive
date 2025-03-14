@@ -12,7 +12,8 @@ import (
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	vfs_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
+	"github.com/sushydev/vfs_go/filesystem"
+	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
 )
 
 var _ api.FileSystemServiceServer = &FileSystemService{}
@@ -21,11 +22,11 @@ type FileSystemService struct {
 	api.UnimplementedFileSystemServiceServer
 
 	client       *real_debrid.Client
-	fileSystem   vfs_interfaces.FileSystem
+	fileSystem   *filesystem.FileSystem
 	mediaManager *media_service.MediaService
 }
 
-func NewFileSystemService(client *real_debrid.Client, fileSystem vfs_interfaces.FileSystem, mediaService *media_service.MediaService) *FileSystemService {
+func NewFileSystemService(client *real_debrid.Client, fileSystem *filesystem.FileSystem, mediaService *media_service.MediaService) *FileSystemService {
 	return &FileSystemService{
 		client:       client,
 		fileSystem:   fileSystem,
@@ -33,7 +34,7 @@ func NewFileSystemService(client *real_debrid.Client, fileSystem vfs_interfaces.
 	}
 }
 
-func getApiNode(node vfs_interfaces.Node) (*api.Node, error) {
+func getApiNode(node filesystem_interfaces.Node) (*api.Node, error) {
 	if node == nil {
 		return nil, nil
 	}
@@ -41,15 +42,15 @@ func getApiNode(node vfs_interfaces.Node) (*api.Node, error) {
 	switch node.GetMode() {
 	case fs.ModeDir:
 		return &api.Node{
-			Identifier: node.GetId(),
-			Name:       node.GetName(),
-			Type:       api.NodeType_DIRECTORY,
+			Id:   node.GetId(),
+			Name: node.GetName(),
+			Mode: uint32(node.GetMode()),
 		}, nil
 	default:
 		return &api.Node{
-			Identifier: node.GetId(),
-			Name:       node.GetName(),
-			Type:       api.NodeType_FILE,
+			Id:   node.GetId(),
+			Name: node.GetName(),
+			Mode: uint32(node.GetMode()),
 		}, nil
 	}
 }
@@ -60,19 +61,18 @@ func (service *FileSystemService) Root(ctx context.Context, req *api.RootRequest
 		return nil, err
 	}
 
-	response := &api.RootResponse{
-		Root: &api.Node{
-			Identifier: node.GetId(),
-			Name:       node.GetName(),
-			Type:       api.NodeType_DIRECTORY,
-		},
+	apiNode, err := getApiNode(node)
+	if err != nil {
+		return nil, err
 	}
 
-	return response, nil
+	return &api.RootResponse{
+		Root: apiNode,
+	}, nil
 }
 
 func (service *FileSystemService) ReadDirAll(ctx context.Context, req *api.ReadDirAllRequest) (*api.ReadDirAllResponse, error) {
-	nodes, err := service.fileSystem.ReadDir(req.Identifier)
+	nodes, err := service.fileSystem.ReadDir(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (service *FileSystemService) ReadDirAll(ctx context.Context, req *api.ReadD
 }
 
 func (service *FileSystemService) Lookup(ctx context.Context, req *api.LookupRequest) (*api.LookupResponse, error) {
-	node, err := service.fileSystem.Lookup(req.Identifier, req.Name)
+	node, err := service.fileSystem.Lookup(req.NodeId, req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +116,31 @@ func (service *FileSystemService) Lookup(ctx context.Context, req *api.LookupReq
 	return response, nil
 }
 
-func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveRequest) (*api.RemoveResponse, error) {
-	parentDirectory, err := service.fileSystem.Open(req.Identifier)
+func (service *FileSystemService) Create(ctx context.Context, req *api.CreateRequest) (*api.CreateResponse, error) {
+	parentDirectory, err := service.fileSystem.Open(req.ParentNodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := service.fileSystem.FindChildNode(req.Name, parentDirectory)
+	if parentDirectory == nil {
+		return nil, syscall.ENOENT
+	}
+
+	if !parentDirectory.GetMode().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
+	err = service.fileSystem.Touch(parentDirectory.GetId(), req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.CreateResponse{}, nil
+}
+
+// remove file
+func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveRequest) (*api.RemoveResponse, error) {
+	node, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -131,19 +149,40 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 		return nil, nil
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		directory, err := service.fileSystem.GetDirectory(node.GetIdentifier())
+	switch node.GetMode() {
+	case fs.ModeDir:
+		directory, err := service.fileSystem.Open(node.GetId())
 		if err != nil {
 			return nil, err
 		}
 
-		err = service.fileSystem.DeleteDirectory(directory)
+		if directory == nil {
+			return nil, nil
+		}
+
+		if !directory.GetMode().IsDir() {
+			return nil, syscall.ENOTDIR
+		}
+
+		err = service.fileSystem.RmDir(directory.GetId())
 		if err != nil {
 			return nil, err
 		}
-	case vfs_node.FileNode:
-		file, err := service.fileSystem.GetFile(node.GetIdentifier())
+	default:
+		file, err := service.fileSystem.Open(node.GetId())
+		if err != nil {
+			return nil, err
+		}
+
+		if file == nil {
+			return nil, nil
+		}
+
+		if !file.GetMode().IsRegular() {
+			return nil, syscall.EISDIR
+		}
+
+		err = service.fileSystem.RemoveFile(file.GetId())
 		if err != nil {
 			return nil, err
 		}
@@ -153,30 +192,27 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 			return nil, err
 		}
 
-		torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
-		if err != nil {
-			return nil, err
-		}
-
-		if torrent != nil {
-			transaction, err := service.mediaManager.NewTransaction()
+		if torrentFile != nil {
+			torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
 			if err != nil {
 				return nil, err
 			}
 
-			err = service.mediaManager.DeleteTorrent(transaction, torrent)
-			if err != nil {
-				return nil, err
-			}
+			if torrent != nil {
+				transaction, err := service.mediaManager.NewTransaction()
+				if err != nil {
+					return nil, err
+				}
 
-			err = transaction.Commit()
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			err = service.fileSystem.DeleteFile(file)
-			if err != nil {
-				return nil, err
+				err = service.mediaManager.DeleteTorrent(transaction, torrent)
+				if err != nil {
+					return nil, err
+				}
+
+				err = transaction.Commit()
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -185,12 +221,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 }
 
 func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameRequest) (*api.RenameResponse, error) {
-	directory, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
-	if err != nil {
-		return nil, err
-	}
-
-	node, err := service.fileSystem.FindChildNode(req.Name, directory)
+	node, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -199,16 +230,32 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 		return nil, nil
 	}
 
-	newParent, err := service.fileSystem.GetDirectory(req.NewParentIdentifier)
+	newParent, err := service.fileSystem.Open(req.NewParentNodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		directory, err := service.fileSystem.GetDirectory(node.GetIdentifier())
+	if newParent == nil {
+		return nil, syscall.ENOENT
+	}
+
+	if !newParent.GetMode().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
+	switch node.GetMode() {
+	case fs.ModeDir:
+		directory, err := service.fileSystem.Open(node.GetId())
 		if err != nil {
 			return nil, err
+		}
+
+		if directory == nil {
+			return nil, nil
+		}
+
+		if !directory.GetMode().IsDir() {
+			return nil, syscall.ENOTDIR
 		}
 
 		updatedDirectory, err := service.fileSystem.UpdateDirectory(directory, req.NewName, newParent)
@@ -216,17 +263,26 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 			return nil, err
 		}
 
-		return &api.RenameResponse{
-			Node: &api.Node{
-				Identifier: updatedDirectory.GetIdentifier(),
-				Name:       updatedDirectory.GetName(),
-				Type:       api.NodeType_DIRECTORY,
-			},
-		}, nil
-	case vfs_node.FileNode:
-		file, err := service.fileSystem.GetFile(node.GetIdentifier())
+		apiNode, err := getApiNode(updatedDirectory)
 		if err != nil {
 			return nil, err
+		}
+
+		return &api.RenameResponse{
+			Node: apiNode,
+		}, nil
+	default:
+		file, err := service.fileSystem.Open(node.GetId())
+		if err != nil {
+			return nil, err
+		}
+
+		if file == nil {
+			return nil, nil
+		}
+
+		if !file.GetMode().IsRegular() {
+			return nil, syscall.EISDIR
 		}
 
 		updatedFile, err := service.fileSystem.UpdateFile(file, req.NewName, newParent, file.GetContentType(), file.GetData())
@@ -234,24 +290,19 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 			return nil, err
 		}
 
+		apiNode, err := getApiNode(updatedFile)
+		if err != nil {
+			return nil, err
+		}
+
 		return &api.RenameResponse{
-			Node: &api.Node{
-				Identifier: updatedFile.GetIdentifier(),
-				Name:       updatedFile.GetName(),
-				Type:       api.NodeType_FILE,
-			},
+			Node: apiNode,
 		}, nil
 	}
-
-	return nil, nil
-}
-
-func (service *FileSystemService) Create(ctx context.Context, req *api.CreateRequest) (*api.CreateResponse, error) {
-	return nil, nil
 }
 
 func (service *FileSystemService) Mkdir(ctx context.Context, req *api.MkdirRequest) (*api.MkdirResponse, error) {
-	parentNode, err := service.fileSystem.Open(req.ParentIdentifier)
+	parentNode, err := service.fileSystem.Open(req.ParentNodeId)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +320,7 @@ func (service *FileSystemService) Mkdir(ctx context.Context, req *api.MkdirReque
 		return nil, err
 	}
 
-	directory, err := service.fileSystem.GetNodeByParentAndName(parentNode.GetId(), req.Name)
+	directory, err := service.fileSystem.Lookup(parentNode.GetId(), req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -311,21 +362,25 @@ func (service *FileSystemService) Link(ctx context.Context, req *api.LinkRequest
 
 	return &api.LinkResponse{
 		Node: &api.Node{
-			Identifier: file.GetIdentifier(),
-			Name:       file.GetName(),
-			Type:       api.NodeType_FILE,
+			Id:   file.GetId(),
+			Name: file.GetName(),
+			Mode: uint32(file.GetMode()),
 		},
 	}, nil
 }
 
-func (service *FileSystemService) GetVideoSize(ctx context.Context, req *api.GetVideoSizeRequest) (*api.GetVideoSizeResponse, error) {
-	file, err := service.fileSystem.GetFile(req.Identifier)
+func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetFileInfoRequest) (*api.GetFileInfoResponse, error) {
+	file, err := service.fileSystem.Open(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
 
 	if file == nil {
 		return nil, nil
+	}
+
+	if !file.GetMode().IsRegular() {
+		return nil, syscall.EISDIR
 	}
 
 	if file.GetContentType() != config.GetContentType() {
@@ -341,19 +396,24 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *api.Get
 		return nil, nil
 	}
 
-	return &api.GetVideoSizeResponse{
+	return &api.GetFileInfoResponse{
 		Size: uint64(torrentFile.GetSize()),
+		Mode: uint32(file.GetMode()),
 	}, nil
 }
 
-func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *api.GetVideoUrlRequest) (*api.GetVideoUrlResponse, error) {
-	file, err := service.fileSystem.GetFile(req.Identifier)
+func (service *FileSystemService) GetStreamUrl(ctx context.Context, req *api.GetStreamUrlRequest) (*api.GetStreamUrlResponse, error) {
+	file, err := service.fileSystem.Open(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
 
 	if file == nil {
 		return nil, nil
+	}
+
+	if !file.GetMode().IsRegular() {
+		return nil, syscall.EISDIR
 	}
 
 	if file.GetContentType() != config.GetContentType() {
@@ -370,7 +430,7 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *api.GetV
 		return nil, err
 	}
 
-	response := &api.GetVideoUrlResponse{
+	response := &api.GetStreamUrlResponse{
 		Url: unrestrictResponse.Download,
 	}
 
