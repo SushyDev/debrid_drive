@@ -50,7 +50,7 @@ func (instance *Poller) Cron() {
 func (instance *Poller) Poll() error {
 	instance.logger.Info("Polling started")
 
-	torrents, err := real_debrid_api.GetTorrents(instance.client)
+	torrents, err := real_debrid_api.GetTorrents(instance.client, 1000, 1)
 	if err != nil {
 		return err
 	}

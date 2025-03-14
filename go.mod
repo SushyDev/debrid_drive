@@ -2,10 +2,6 @@ module debrid_drive
 
 go 1.24.0
 
-replace github.com/sushydev/real_debrid_go => ../real_debrid_go
-
-replace github.com/sushydev/vfs_go => ../vfs_go
-
 require (
 	github.com/sushydev/real_debrid_go v1.0.1
 	github.com/sushydev/vfs_go v1.0.1
