@@ -13,10 +13,10 @@ import (
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	"github.com/sushydev/vfs_go/filesystem"
-	"github.com/sushydev/vfs_go/filesystem/interfaces"
-	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
-	"github.com/sushydev/vfs_go/filesystem/service"
+	"github.com/sushydev/vfs_go"
+	"github.com/sushydev/vfs_go/interfaces"
+	filesystem_interfaces "github.com/sushydev/vfs_go/interfaces"
+	"github.com/sushydev/vfs_go/service"
 )
 
 type MediaService struct {
@@ -97,7 +97,7 @@ func (instance *MediaService) NewTransaction() (*sql.Tx, error) {
 
 func (instance *MediaService) GetTorrentFileByFile(file interfaces.Node) (*media_repository.TorrentFile, error) {
 	torrentFile, err := instance.mediaRepository.GetTorrentFileByFileId(file.GetId())
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		instance.logger.Error("Failed to get torrent file by file id", err)
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (instance *MediaService) GetTorrentFileByFile(file interfaces.Node) (*media
 
 func (instance *MediaService) GetTorrentByTorrentFile(torrentFile *media_repository.TorrentFile) (*media_repository.Torrent, error) {
 	torrent, err := instance.mediaRepository.GetTorrentByTorrentFileId(torrentFile.GetIdentifier())
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		instance.logger.Error("Failed to get torrent by torrent file id", err)
 		return nil, err
 	}
@@ -138,6 +138,7 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 	var torrentDirectory string
 
 	if config.GetUseFilenameInLister() {
+		// TODO: This breaks if duplicate media in account
 		torrentDirectory = torrent.Filename
 	} else {
 		torrentDirectory = torrent.ID
@@ -190,14 +191,20 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 			return err
 		}
 
-		_, err = instance.fileSystem.WriteFile(fileNode.GetId(), []byte{}, config.GetContentType())
-		if err != nil {
-			instance.logger.Error("Failed to write file", err)
+		existingTorrentFile, err := instance.mediaRepository.GetTorrentFileByFileId(fileNode.GetId())
+		if err != nil && err != sql.ErrNoRows {
+			instance.logger.Error("Failed to get torrent file by file id", err)
+		}
+
+		if existingTorrentFile != nil {
+			instance.logger.Info("File already exists in database")
+			continue
 		}
 
 		_, err = instance.mediaRepository.AddTorrentFile(transaction, databaseTorrent, torrentFile, fileNode, link, index)
 		if err != nil {
-			instance.logger.Error("Failed to add torrent file to database", err)
+			message := fmt.Sprintf("Failed to add torrent file to database: %s", name)
+			instance.logger.Error(message, err)
 			return err
 		}
 	}

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	"github.com/sushydev/vfs_go/filesystem/interfaces"
+	"github.com/sushydev/vfs_go/interfaces"
 )
 
 type TorrentFile struct {
@@ -58,7 +58,7 @@ func (mediaService *MediaRepository) GetTorrentFileByFileId(identifier uint64) (
 	)
 
 	if err != nil {
-		return nil, mediaService.error("Failed to scan data", err)
+		return nil, err
 	}
 
 	return torrentFile, nil

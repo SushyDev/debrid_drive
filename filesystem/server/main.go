@@ -9,10 +9,10 @@ import (
 	api "github.com/sushydev/stream_mount_api"
 
 	media_service "debrid_drive/media/service"
-	file_system_service "debrid_drive/file_system/service"
+	filesystem_service "debrid_drive/filesystem/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
-	"github.com/sushydev/vfs_go/filesystem"
+	"github.com/sushydev/vfs_go"
 	grpc "google.golang.org/grpc"
 )
 
@@ -29,7 +29,7 @@ func NewFileSystemServer(client *real_debrid.Client, fileSystem *filesystem.File
 
 	server := grpc.NewServer()
 
-	fileSystemService := file_system_service.NewFileSystemService(client, fileSystem, mediaService)
+	fileSystemService := filesystem_service.NewFileSystemService(client, fileSystem, mediaService)
 
 	api.RegisterFileSystemServiceServer(server, fileSystemService)
 

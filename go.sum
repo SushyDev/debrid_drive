@@ -28,6 +28,10 @@ github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKs
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/sushydev/real_debrid_go v1.0.2 h1:8bC14Lm3y7I9L93LEhQPL0S42flxV1j1/jFW08DXxQQ=
 github.com/sushydev/real_debrid_go v1.0.2/go.mod h1:9Tst1Kkq1dDU/ErSYjheu/hJmNmEc0bGdoOy/OGbg4M=
+github.com/sushydev/stream_mount_api v1.0.0 h1:XLKeIh4U2w9+3jus7fgpG98NLLHL0Bdchq3BgZbft6g=
+github.com/sushydev/stream_mount_api v1.0.0/go.mod h1:VF1RsSWB3ZlK4ip0cHnByGU8Br9CHqIKEPXtRg/PnGk=
+github.com/sushydev/vfs_go v1.1.0 h1:1OdTPaYgMjm62w6BniE+AV4PrKPm/CezqKiR9Hbk2vY=
+github.com/sushydev/vfs_go v1.1.0/go.mod h1:S8w93l3RTPw5As+YLjAYON2/tmOWHlMtjdCSF4uMWXc=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
 go.opentelemetry.io/auto/sdk v1.1.0/go.mod h1:3wSPjt5PWp2RhlCcmmOial7AvC4DQqZb7a7wCow3W8A=
 go.opentelemetry.io/otel v1.34.0 h1:zRLXxLCgL1WyKsPVrgbSdMN4c0FMkDAskSTQP+0hdUY=

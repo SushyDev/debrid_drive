@@ -2,14 +2,10 @@ module debrid_drive
 
 go 1.24.0
 
-replace github.com/sushydev/vfs_go => ../vfs_go
-
-replace github.com/sushydev/stream_mount_api => ../stream_mount_api
-
 require (
 	github.com/sushydev/real_debrid_go v1.0.2
-	github.com/sushydev/stream_mount_api v0.0.0-00010101000000-000000000000
-	github.com/sushydev/vfs_go v1.0.1
+	github.com/sushydev/stream_mount_api v1.0.0
+	github.com/sushydev/vfs_go v1.1.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.71.0
 	gopkg.in/yaml.v3 v3.0.1

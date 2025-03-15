@@ -4,13 +4,13 @@ import (
 	"debrid_drive/config"
 	"debrid_drive/database"
 	"debrid_drive/logger"
-	file_system_server "debrid_drive/file_system/server"
+	filesystem_server "debrid_drive/filesystem/server"
 	media_service "debrid_drive/media/service"
 	media_repository "debrid_drive/media/repository"
 	"debrid_drive/poller"
 
 	"github.com/sushydev/real_debrid_go"
-	"github.com/sushydev/vfs_go/filesystem"
+	"github.com/sushydev/vfs_go"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func main() {
 
 	mediaService := media_repository.NewMediaService(database.GetDatabase())
 	mediaManager := media_service.NewMediaService(client, database, fileSystem, mediaService)
-	fileSystemServer := file_system_server.NewFileSystemServer(client, fileSystem, mediaManager)
+	fileSystemServer := filesystem_server.NewFileSystemServer(client, fileSystem, mediaManager)
 
 	fileSystemServerReady := make(chan struct{})
 	go fileSystemServer.Serve(fileSystemServerReady)

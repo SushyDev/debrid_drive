@@ -87,6 +87,7 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 
 		if exists {
 			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
+			instance.logger.Info(fmt.Sprintf("Entry already exists:	%s - %s", torrent.ID, torrent.Filename))
 			continue
 		}
 
@@ -99,6 +100,7 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 
 		if rejected {
 			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
+			instance.logger.Info(fmt.Sprintf("Entry is rejected:	%s - %s", torrent.ID, torrent.Filename))
 			continue
 		}
 
