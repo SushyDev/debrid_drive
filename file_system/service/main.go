@@ -1,31 +1,37 @@
 package file_system_server
 
 import (
-	context "context"
-	"fmt"
+	"context"
+	"io/fs"
+	"syscall"
 
 	"debrid_drive/config"
-	"debrid_drive/vfs_api"
+
+	api "github.com/sushydev/stream_mount_api"
 
 	media_service "debrid_drive/media/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	vfs "github.com/sushydev/vfs_go"
-	vfs_node "github.com/sushydev/vfs_go/node"
+	"github.com/sushydev/vfs_go/filesystem"
+	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
+	filesystem_service "github.com/sushydev/vfs_go/filesystem/service"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-var _ vfs_api.FileSystemServiceServer = &FileSystemService{}
+var _ api.FileSystemServiceServer = &FileSystemService{}
 
 type FileSystemService struct {
-	vfs_api.UnimplementedFileSystemServiceServer
+	api.UnimplementedFileSystemServiceServer
 
 	client       *real_debrid.Client
-	fileSystem   *vfs.FileSystem
+	fileSystem   *filesystem.FileSystem
 	mediaManager *media_service.MediaService
 }
 
-func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem, mediaService *media_service.MediaService) *FileSystemService {
+func NewFileSystemService(client *real_debrid.Client, fileSystem *filesystem.FileSystem, mediaService *media_service.MediaService) *FileSystemService {
 	return &FileSystemService{
 		client:       client,
 		fileSystem:   fileSystem,
@@ -33,60 +39,63 @@ func NewFileSystemService(client *real_debrid.Client, fileSystem *vfs.FileSystem
 	}
 }
 
-// fvs_node to vfs_api node
-// TODO: better name
-func nodeToNode(node *vfs_node.Node) (*vfs_api.Node, error) {
+func getApiNode(node filesystem_interfaces.Node) (*api.Node, error) {
 	if node == nil {
 		return nil, nil
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		return &vfs_api.Node{
-			Identifier: node.GetIdentifier(),
-			Name:       node.GetName(),
-			Type:       vfs_api.NodeType_DIRECTORY,
+	switch node.GetMode() {
+	case fs.ModeDir:
+		return &api.Node{
+			Id:   node.GetId(),
+			Name: node.GetName(),
+			Mode: uint32(node.GetMode()),
+			Streamable: false,
 		}, nil
-	case vfs_node.FileNode:
-		return &vfs_api.Node{
-			Identifier: node.GetIdentifier(),
-			Name:       node.GetName(),
-			Type:       vfs_api.NodeType_FILE,
+	default:
+		return &api.Node{
+			Id:   node.GetId(),
+			Name: node.GetName(),
+			Mode: uint32(node.GetMode()),
+			Streamable: node.GetContentType() == config.GetContentType(),
 		}, nil
 	}
-
-	return nil, fmt.Errorf("unknown node type")
 }
 
-func (service *FileSystemService) Root(ctx context.Context, req *vfs_api.RootRequest) (*vfs_api.RootResponse, error) {
-	root := service.fileSystem.GetRoot()
-
-	response := &vfs_api.RootResponse{
-		Root: &vfs_api.Node{
-			Identifier: root.GetIdentifier(),
-			Name:       root.GetName(),
-			Type:       vfs_api.NodeType_DIRECTORY,
-		},
+func (service *FileSystemService) Root(ctx context.Context, req *api.RootRequest) (*api.RootResponse, error) {
+	node, err := filesystem_service.GetRoot(service.fileSystem)
+	if err == syscall.ENOENT {
+		return nil, status.Error(codes.NotFound, "node not found")
 	}
 
-	return response, nil
-}
-
-func (service *FileSystemService) ReadDirAll(ctx context.Context, req *vfs_api.ReadDirAllRequest) (*vfs_api.ReadDirAllResponse, error) {
-	directory, err := service.fileSystem.GetDirectory(req.Identifier)
 	if err != nil {
 		return nil, err
 	}
 
-	nodes, err := service.fileSystem.GetChildNodes(directory)
+	apiNode, err := getApiNode(node)
 	if err != nil {
 		return nil, err
 	}
 
-	var responseNodes []*vfs_api.Node
+	return &api.RootResponse{
+		Root: apiNode,
+	}, nil
+}
+
+func (service *FileSystemService) ReadDirAll(ctx context.Context, req *api.ReadDirAllRequest) (*api.ReadDirAllResponse, error) {
+	nodes, err := service.fileSystem.ReadDir(req.NodeId)
+	if err == syscall.ENOENT {
+		return nil, status.Error(codes.NotFound, "node not found")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var responseNodes []*api.Node
 
 	for _, node := range nodes {
-		apiNode, err := nodeToNode(node)
+		apiNode, err := getApiNode(node)
 		if err != nil {
 			continue
 		}
@@ -98,46 +107,59 @@ func (service *FileSystemService) ReadDirAll(ctx context.Context, req *vfs_api.R
 		responseNodes = append(responseNodes, apiNode)
 	}
 
-	return &vfs_api.ReadDirAllResponse{
+	return &api.ReadDirAllResponse{
 		Nodes: responseNodes,
 	}, nil
 
 }
 
-func (service *FileSystemService) Lookup(ctx context.Context, req *vfs_api.LookupRequest) (*vfs_api.LookupResponse, error) {
-	parent, err := service.fileSystem.GetDirectory(req.Identifier)
+func (service *FileSystemService) Lookup(ctx context.Context, req *api.LookupRequest) (*api.LookupResponse, error) {
+	node, err := service.fileSystem.Lookup(req.NodeId, req.Name)
+	if err == syscall.ENOENT {
+		return nil, status.Error(codes.NotFound, "node not found")
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := service.fileSystem.FindChildNode(req.Name, parent)
+	apiNode, err := getApiNode(node)
 	if err != nil {
 		return nil, err
 	}
 
-	apiNode, err := nodeToNode(node)
-	if err != nil {
-		return nil, err
-	}
-
-	if apiNode == nil {
-		return nil, nil
-	}
-
-	response := &vfs_api.LookupResponse{
+	response := &api.LookupResponse{
 		Node: apiNode,
 	}
 
 	return response, nil
 }
 
-func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.RemoveRequest) (*vfs_api.RemoveResponse, error) {
-	parentDirectory, err := service.fileSystem.GetDirectory(req.Identifier)
+func (service *FileSystemService) Create(ctx context.Context, req *api.CreateRequest) (*api.CreateResponse, error) {
+	parentDirectory, err := service.fileSystem.Open(req.ParentNodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := service.fileSystem.FindChildNode(req.Name, parentDirectory)
+	if parentDirectory == nil {
+		return nil, syscall.ENOENT
+	}
+
+	if !parentDirectory.GetMode().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
+	err = service.fileSystem.Touch(parentDirectory.GetId(), req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.CreateResponse{}, nil
+}
+
+// remove file
+func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveRequest) (*api.RemoveResponse, error) {
+	node, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -146,19 +168,22 @@ func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.Remov
 		return nil, nil
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		directory, err := service.fileSystem.GetDirectory(node.GetIdentifier())
+	switch node.GetMode() {
+	case fs.FileMode(0):
+		file, err := service.fileSystem.Open(node.GetId())
 		if err != nil {
 			return nil, err
 		}
 
-		err = service.fileSystem.DeleteDirectory(directory)
-		if err != nil {
-			return nil, err
+		if file == nil {
+			return nil, nil
 		}
-	case vfs_node.FileNode:
-		file, err := service.fileSystem.GetFile(node.GetIdentifier())
+
+		if !file.GetMode().IsRegular() {
+			return nil, syscall.EISDIR
+		}
+
+		err = service.fileSystem.RemoveFile(file.GetId())
 		if err != nil {
 			return nil, err
 		}
@@ -168,157 +193,199 @@ func (service *FileSystemService) Remove(ctx context.Context, req *vfs_api.Remov
 			return nil, err
 		}
 
-		torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
+		if torrentFile != nil {
+			torrent, err := service.mediaManager.GetTorrentByTorrentFile(torrentFile)
+			if err != nil {
+				return nil, err
+			}
+
+			if torrent != nil {
+				transaction, err := service.mediaManager.NewTransaction()
+				if err != nil {
+					return nil, err
+				}
+
+				err = service.mediaManager.DeleteTorrent(transaction, torrent)
+				if err != nil {
+					return nil, err
+				}
+
+				err = transaction.Commit()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	case fs.ModeDir:
+		directory, err := service.fileSystem.Open(node.GetId())
 		if err != nil {
 			return nil, err
 		}
 
-		if torrent != nil {
-			transaction, err := service.mediaManager.NewTransaction()
-			if err != nil {
-				return nil, err
-			}
+		if directory == nil {
+			return nil, nil
+		}
 
-			err = service.mediaManager.DeleteTorrent(transaction, torrent)
-			if err != nil {
-				return nil, err
-			}
+		if !directory.GetMode().IsDir() {
+			return nil, syscall.ENOTDIR
+		}
 
-			err = transaction.Commit()
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			err = service.fileSystem.DeleteFile(file)
-			if err != nil {
-				return nil, err
-			}
+		err = service.fileSystem.RmDir(directory.GetId())
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	return &vfs_api.RemoveResponse{}, nil
+	return &api.RemoveResponse{}, nil
 }
 
-func (service *FileSystemService) Rename(ctx context.Context, req *vfs_api.RenameRequest) (*vfs_api.RenameResponse, error) {
-	directory, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
+func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameRequest) (*api.RenameResponse, error) {
+	err := service.fileSystem.Rename(req.NodeId, req.Name, req.ParentNodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	node, err := service.fileSystem.FindChildNode(req.Name, directory)
+	updatedDirectory, err := service.fileSystem.Open(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	if node == nil {
-		return nil, nil
-	}
-
-	newParent, err := service.fileSystem.GetDirectory(req.NewParentIdentifier)
+	apiNode, err := getApiNode(updatedDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	switch node.GetType() {
-	case vfs_node.DirectoryNode:
-		directory, err := service.fileSystem.GetDirectory(node.GetIdentifier())
-		if err != nil {
-			return nil, err
-		}
-
-		updatedDirectory, err := service.fileSystem.UpdateDirectory(directory, req.NewName, newParent)
-		if err != nil {
-			return nil, err
-		}
-
-		return &vfs_api.RenameResponse{
-			Node: &vfs_api.Node{
-				Identifier: updatedDirectory.GetIdentifier(),
-				Name:       updatedDirectory.GetName(),
-				Type:       vfs_api.NodeType_DIRECTORY,
-			},
-		}, nil
-	case vfs_node.FileNode:
-		file, err := service.fileSystem.GetFile(node.GetIdentifier())
-		if err != nil {
-			return nil, err
-		}
-
-		updatedFile, err := service.fileSystem.UpdateFile(file, req.NewName, newParent, file.GetContentType(), file.GetData())
-		if err != nil {
-			return nil, err
-		}
-
-		return &vfs_api.RenameResponse{
-			Node: &vfs_api.Node{
-				Identifier: updatedFile.GetIdentifier(),
-				Name:       updatedFile.GetName(),
-				Type:       vfs_api.NodeType_FILE,
-			},
-		}, nil
-	}
-
-	return nil, nil
-}
-
-func (service *FileSystemService) Create(ctx context.Context, req *vfs_api.CreateRequest) (*vfs_api.CreateResponse, error) {
-	return nil, nil
-}
-
-func (service *FileSystemService) Mkdir(ctx context.Context, req *vfs_api.MkdirRequest) (*vfs_api.MkdirResponse, error) {
-	parent, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
-	if err != nil {
-		return nil, err
-	}
-
-	directory, err := service.fileSystem.CreateDirectory(req.Name, parent)
-	if err != nil {
-		return nil, err
-	}
-
-	return &vfs_api.MkdirResponse{
-		Node: &vfs_api.Node{
-			Identifier: directory.GetIdentifier(),
-			Name:       directory.GetName(),
-			Type:       vfs_api.NodeType_DIRECTORY,
-		},
+	return &api.RenameResponse{
+		Node: apiNode,
 	}, nil
 }
 
-func (service *FileSystemService) Link(ctx context.Context, req *vfs_api.LinkRequest) (*vfs_api.LinkResponse, error) {
-	parent, err := service.fileSystem.GetDirectory(req.ParentIdentifier)
+func (service *FileSystemService) Mkdir(ctx context.Context, req *api.MkdirRequest) (*api.MkdirResponse, error) {
+	parentNode, err := service.fileSystem.Open(req.ParentNodeId)
 	if err != nil {
 		return nil, err
 	}
 
-	existingFile, err := service.fileSystem.GetFile(req.Identifier)
+	if parentNode == nil {
+		return nil, syscall.ENOENT
+	}
+
+	if !parentNode.GetMode().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
+	err = service.fileSystem.MkDir(parentNode.GetId(), req.Name)
 	if err != nil {
 		return nil, err
 	}
 
-	if existingFile == nil {
-		return nil, nil
+	directory, err := service.fileSystem.Lookup(parentNode.GetId(), req.Name)
+	if err != nil {
+		return nil, err
 	}
 
-	file, err := service.fileSystem.UpdateFile(existingFile, req.Name, parent, existingFile.GetContentType(), existingFile.GetData())
+	if directory == nil {
+		return nil, syscall.ENOENT
+	}
 
-	return &vfs_api.LinkResponse{
-		Node: &vfs_api.Node{
-			Identifier: file.GetIdentifier(),
-			Name:       file.GetName(),
-			Type:       vfs_api.NodeType_FILE,
-		},
+	if !directory.GetMode().IsDir() {
+		return nil, syscall.ENOTDIR
+	}
+
+	apiNode, err := getApiNode(directory)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.MkdirResponse{
+		Node: apiNode,
 	}, nil
 }
 
-func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api.GetVideoSizeRequest) (*vfs_api.GetVideoSizeResponse, error) {
-	file, err := service.fileSystem.GetFile(req.Identifier)
+func (service *FileSystemService) Link(ctx context.Context, req *api.LinkRequest) (*api.LinkResponse, error) {
+	err := service.fileSystem.Link(req.NodeId, req.Name, req.ParentNodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	linkedNode, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	apiNode, err := getApiNode(linkedNode)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.LinkResponse{
+		Node: apiNode,
+	}, nil
+}
+
+func (service *FileSystemService) ReadFile(ctx context.Context, req *api.ReadFileRequest) (*api.ReadFileResponse, error) {
+	node, err := service.fileSystem.Open(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	if node.GetMode().IsDir() {
+		return nil, syscall.EISDIR
+	}
+
+	if node.GetContentType() == config.GetContentType() {
+		return nil, syscall.EISDIR
+	}
+
+	content := node.GetContent()
+
+	data := content[req.Offset:]
+
+	return &api.ReadFileResponse{
+		Data: data,
+	}, nil
+}
+
+func (service *FileSystemService) WriteFile(ctx context.Context, req *api.WriteFileRequest) (*api.WriteFileResponse, error) {
+	node, err := service.fileSystem.Open(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	if node.GetMode().IsDir() {
+		return nil, syscall.EISDIR
+	}
+
+	if node.GetContentType() == config.GetContentType() {
+		return nil, syscall.EISDIR
+	}
+
+	content := node.GetContent()
+
+	content = append(content[:req.Offset], req.Data...)
+
+	n, err := service.fileSystem.WriteFile(node.GetId(), content, node.GetContentType())
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.WriteFileResponse{
+		BytesWritten: uint64(n),
+	}, nil
+}
+
+func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetFileInfoRequest) (*api.GetFileInfoResponse, error) {
+	file, err := service.fileSystem.Open(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
 
 	if file == nil {
 		return nil, nil
+	}
+
+	if !file.GetMode().IsRegular() {
+		return nil, syscall.EISDIR
 	}
 
 	if file.GetContentType() != config.GetContentType() {
@@ -334,19 +401,24 @@ func (service *FileSystemService) GetVideoSize(ctx context.Context, req *vfs_api
 		return nil, nil
 	}
 
-	return &vfs_api.GetVideoSizeResponse{
+	return &api.GetFileInfoResponse{
 		Size: uint64(torrentFile.GetSize()),
+		Mode: uint32(file.GetMode()),
 	}, nil
 }
 
-func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.GetVideoUrlRequest) (*vfs_api.GetVideoUrlResponse, error) {
-	file, err := service.fileSystem.GetFile(req.Identifier)
+func (service *FileSystemService) GetStreamUrl(ctx context.Context, req *api.GetStreamUrlRequest) (*api.GetStreamUrlResponse, error) {
+	file, err := service.fileSystem.Open(req.NodeId)
 	if err != nil {
 		return nil, err
 	}
 
 	if file == nil {
 		return nil, nil
+	}
+
+	if !file.GetMode().IsRegular() {
+		return nil, syscall.EISDIR
 	}
 
 	if file.GetContentType() != config.GetContentType() {
@@ -363,7 +435,7 @@ func (service *FileSystemService) GetVideoUrl(ctx context.Context, req *vfs_api.
 		return nil, err
 	}
 
-	response := &vfs_api.GetVideoUrlResponse{
+	response := &api.GetStreamUrlResponse{
 		Url: unrestrictResponse.Download,
 	}
 

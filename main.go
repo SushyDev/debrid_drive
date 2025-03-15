@@ -8,10 +8,9 @@ import (
 	media_service "debrid_drive/media/service"
 	media_repository "debrid_drive/media/repository"
 	"debrid_drive/poller"
-	"debrid_drive/garbage_cleaner"
 
 	"github.com/sushydev/real_debrid_go"
-	vfs "github.com/sushydev/vfs_go"
+	"github.com/sushydev/vfs_go/filesystem"
 )
 
 func main() {
@@ -33,7 +32,7 @@ func main() {
 		panic(err)
 	}
 
-	fileSystem, err := vfs.NewFileSystem("debrid_drive", "./filesystem.db")
+	fileSystem, err := filesystem.New("./filesystem_test.db")
 	if err != nil {
 		logger.Error("Failed to create file system", err)
 		panic(err)
@@ -48,9 +47,9 @@ func main() {
 	<-fileSystemServerReady
 
 	// Init garbage cleaner
-	garbageCleaner := garbage_cleaner.NewGarbageCleaner(fileSystem)
-	garbageCleaner.Poll()
-	go garbageCleaner.Cron()
+	// garbageCleaner := garbage_cleaner.NewGarbageCleaner(fileSystem)
+	// garbageCleaner.Poll()
+	// go garbageCleaner.Cron()
 
 	// Init poller
 	poller := poller.NewPoller(client, mediaManager)

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
-	"github.com/sushydev/vfs_go/node"
+	"github.com/sushydev/vfs_go/filesystem/interfaces"
 )
 
 type TorrentFile struct {
@@ -64,14 +64,14 @@ func (mediaService *MediaRepository) GetTorrentFileByFileId(identifier uint64) (
 	return torrentFile, nil
 }
 
-func (mediaService *MediaRepository) AddTorrentFile(transaction *sql.Tx, databaseTorrent *Torrent, torrentFile real_debrid_api.TorrentFile, fileNode *node.File, link string, index int) (*TorrentFile, error) {
+func (mediaService *MediaRepository) AddTorrentFile(transaction *sql.Tx, databaseTorrent *Torrent, torrentFile real_debrid_api.TorrentFile, fileNode interfaces.Node, link string, index int) (*TorrentFile, error) {
 	query := `
 	INSERT INTO torrent_files (torrent_id, path, size, link, file_index, file_node_id)
 	VALUES (?, ?, ?, ?, ?, ?)
 	RETURNING id, torrent_id, path, size, link, file_index, file_node_id;
 	`
 
-	row := transaction.QueryRow(query, databaseTorrent.identifier, torrentFile.Path, torrentFile.Bytes, link, index, fileNode.GetIdentifier())
+	row := transaction.QueryRow(query, databaseTorrent.identifier, torrentFile.Path, torrentFile.Bytes, link, index, fileNode.GetId())
 
 	databaseTorrentFile := &TorrentFile{}
 	err := row.Scan(
