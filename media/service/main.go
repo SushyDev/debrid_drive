@@ -2,8 +2,8 @@ package service
 
 import (
 	"database/sql"
-	"syscall"
 	"fmt"
+	"syscall"
 
 	"debrid_drive/config"
 	"debrid_drive/database"
@@ -14,7 +14,9 @@ import (
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 	"github.com/sushydev/vfs_go/filesystem"
+	"github.com/sushydev/vfs_go/filesystem/interfaces"
 	filesystem_interfaces "github.com/sushydev/vfs_go/filesystem/interfaces"
+	"github.com/sushydev/vfs_go/filesystem/service"
 )
 
 type MediaService struct {
@@ -61,28 +63,40 @@ func (instance *MediaService) error(message string, err error) error {
 }
 
 func (instance *MediaService) GetManagerDirectory() (filesystem_interfaces.Node, error) {
-	mediaManager, err := instance.fileSystem.Find("media_manager")
-	switch err {
-		case syscall.ENOENT:
-			instance.logger.Info("Creating new media manager directory")
-			return instance.fileSystem.CreateDirectory("media_manager", instance.fileSystem.Root())
-		case nil:
-			return mediaManager, nil
-		default:
-			return nil, instance.error("Failed to find media manager directory", err)
+	root, err := service.GetRoot(instance.fileSystem)
+	if err != nil {
+		return nil, instance.error("Failed to get root directory", err)
 	}
-			
 
+	mediaManager, err := instance.fileSystem.Lookup(root.GetId(), "media_manager")
+	switch err {
+	case nil:
+		return mediaManager, nil
+	case syscall.ENOENT:
+		instance.logger.Info("Creating new media manager directory")
 
-	return instance.fileSystem.FindOrCreateDirectory("media_manager", instance.fileSystem.Root())
+		err = instance.fileSystem.MkDir(root.GetId(), "media_manager")
+		if err != nil {
+			return nil, instance.error("Failed to create media manager directory", err)
+		}
+
+		mediaManager, err = instance.fileSystem.Lookup(root.GetId(), "media_manager")
+		if err != nil {
+			return nil, instance.error("Failed to find media manager directory", err)
+		}
+
+		return mediaManager, nil
+	default:
+		return nil, instance.error("Failed to find media manager directory", err)
+	}
 }
 
 func (instance *MediaService) NewTransaction() (*sql.Tx, error) {
 	return instance.database.NewTransaction()
 }
 
-func (instance *MediaService) GetTorrentFileByFile(file *node.File) (*media_repository.TorrentFile, error) {
-	torrentFile, err := instance.mediaRepository.GetTorrentFileByFileId(file.GetIdentifier())
+func (instance *MediaService) GetTorrentFileByFile(file interfaces.Node) (*media_repository.TorrentFile, error) {
+	torrentFile, err := instance.mediaRepository.GetTorrentFileByFileId(file.GetId())
 	if err != nil {
 		instance.logger.Error("Failed to get torrent file by file id", err)
 		return nil, err
@@ -129,7 +143,7 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		torrentDirectory = torrent.ID
 	}
 
-	directory, err := instance.fileSystem.FindOrCreateDirectory(torrentDirectory, managerDirectory)
+	directory, err := service.FindOrCreateDirectory(instance.fileSystem, managerDirectory.GetId(), torrentDirectory)
 	if err != nil {
 		instance.logger.Error("Failed to create directory", err)
 		return err
@@ -170,10 +184,15 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 
 		link := torrentInfo.Links[index]
 
-		fileNode, err := instance.fileSystem.FindOrCreateFile(name, directory, config.GetContentType(), "")
+		fileNode, err := service.FindOrCreateFile(instance.fileSystem, directory.GetId(), name)
 		if err != nil {
 			instance.logger.Error("Failed to create file", err)
 			return err
+		}
+
+		_, err = instance.fileSystem.WriteFile(fileNode.GetId(), []byte{}, config.GetContentType())
+		if err != nil {
+			instance.logger.Error("Failed to write file", err)
 		}
 
 		_, err = instance.mediaRepository.AddTorrentFile(transaction, databaseTorrent, torrentFile, fileNode, link, index)
@@ -232,7 +251,7 @@ func (instance *MediaService) removeTorrentFiles(transaction *sql.Tx, databaseTo
 			return err
 		}
 
-		vfsFile, err := instance.fileSystem.GetFile(torrentFile.GetFileIdentifier())
+		vfsFile, err := instance.fileSystem.Open(torrentFile.GetFileIdentifier())
 		if err != nil {
 			instance.logger.Error("Failed to get file", err)
 			return err
@@ -242,26 +261,20 @@ func (instance *MediaService) removeTorrentFiles(transaction *sql.Tx, databaseTo
 			continue
 		}
 
-		err = instance.fileSystem.DeleteFile(vfsFile)
+		err = instance.fileSystem.RemoveFile(vfsFile.GetId())
 		if err != nil {
 			instance.logger.Error("Failed to delete file", err)
 			return err
 		}
 
-		parentDirectory, err := instance.fileSystem.GetDirectory(*vfsFile.GetNode().GetParentIdentifier())
-		if err != nil {
-			instance.logger.Error("Failed to get parent directory", err)
-			continue
-		}
-
-		childNodes, err := instance.fileSystem.GetChildNodes(parentDirectory)
+		childNodes, err := instance.fileSystem.ReadDir(vfsFile.GetParentId())
 		if err != nil {
 			instance.logger.Error("Failed to get child nodes", err)
 			continue
 		}
 
 		if len(childNodes) == 0 {
-			err = instance.fileSystem.DeleteDirectory(parentDirectory)
+			err = instance.fileSystem.RmDir(vfsFile.GetParentId())
 			if err != nil {
 				instance.logger.Error("Failed to delete parent directory", err)
 				continue
