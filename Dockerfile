@@ -33,5 +33,10 @@ WORKDIR /app
 # Copy the Pre-built binary file from the previous stage
 COPY --from=builder /app/main /app/main
 
+RUN adduser -D app
+RUN chown -R app /app
+
+USER app
+
 # Command to run the executable
 ENTRYPOINT ["/app/main"]
