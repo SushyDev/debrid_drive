@@ -1,173 +1,83 @@
 package poller
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
+	"net/http"
+	"runtime"
 	"time"
-
-	"debrid_drive/config"
-	"debrid_drive/logger"
-
-	media_repository "debrid_drive/media/repository"
-	media_service "debrid_drive/media/service"
-
-	real_debrid "github.com/sushydev/real_debrid_go"
-	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 )
 
-type Poller struct {
-	client       *real_debrid.Client
-	mediaService *media_service.MediaService
-	logger       *logger.Logger
+type changeFunc func(hash [32]byte)
+
+type poller struct {
+	url     string
+	element string
+	changeFunc  func(hash [32]byte)
+
+	lastHash [32]byte
+	client   *http.Client
+	req      *http.Request
+	ticks    time.Duration
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewPoller(client *real_debrid.Client, mediaService *media_service.MediaService) *Poller {
-	logger, err := logger.NewLogger("Poller")
-	if err != nil {
-		panic(err)
-	}
+func New(url string, element string, ticks time.Duration, changeFunc func(hash [32]byte)) *poller {
+	client := setupHttpClient()
+	req := createRequest(url)
 
-	return &Poller{
-		client:       client,
-		mediaService: mediaService,
-		logger:       logger,
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &poller{
+		url:     url,
+		element: element,
+		changeFunc:  changeFunc,
+
+		lastHash: [32]byte{},
+		client:   client,
+		req:      req,
+		ticks:    ticks,
+
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
-func (instance *Poller) Cron() {
-	interval := config.GetPollIntervalSeconds()
+func (p *poller) Start() {
+	p.exec()
+
+	ticker := time.NewTicker(p.ticks)
+	defer ticker.Stop()
 
 	for {
-		<-time.After(interval)
-
-		err := instance.Poll()
-		if err != nil {
-			instance.logger.Error("Failed to poll", err)
-		}
-	}
-}
-
-func (instance *Poller) Poll() error {
-	instance.logger.Info("Polling started")
-
-	torrents, err := real_debrid_api.GetTorrents(instance.client, 1000, 1)
-	if err != nil {
-		return err
-	}
-
-	instance.checkNewEntries(*torrents)
-	instance.checkRemovedEntries(*torrents)
-
-	instance.logger.Info("Polling complete")
-
-	return nil
-}
-
-func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
-	transaction, err := instance.mediaService.NewTransaction()
-	if err != nil {
-		instance.logger.Error("Failed to begin transaction", err)
-		return
-	}
-	defer transaction.Rollback()
-
-	for _, torrent := range GetEntries(torrents) {
-		_, err := transaction.Exec("SAVEPOINT add_entry")
-		if err != nil {
-			instance.logger.Error("Failed to create savepoint", err)
-			continue
-		}
-
-		exists, err := instance.mediaService.TorrentExists(torrent)
-		if err != nil {
-			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-			instance.logger.Error("Failed to check if torrent exists", err)
+		select {
+		case <-p.ctx.Done():
 			return
+		case <-ticker.C:
+			p.exec()
 		}
-
-		if exists {
-			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-			instance.logger.Info(fmt.Sprintf("Entry already exists:	%s - %s", torrent.ID, torrent.Filename))
-			continue
-		}
-
-		rejected, err := instance.mediaService.TorrentRejected(torrent)
-		if err != nil {
-			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-			instance.logger.Error("Failed to check if torrent is rejected", err)
-			return
-		}
-
-		if rejected {
-			transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-			instance.logger.Info(fmt.Sprintf("Entry is rejected:	%s - %s", torrent.ID, torrent.Filename))
-			continue
-		}
-
-		err = instance.mediaService.AddTorrent(transaction, torrent)
-		if err != nil {
-			switch err.(type) {
-			case media_service.TorrentRejectedError:
-				instance.mediaService.RejectTorrent(transaction, torrent)
-				instance.logger.Info(fmt.Sprintf("Rejected entry:	%s - %s", torrent.ID, torrent.Filename))
-				break
-			default:
-				transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-				instance.logger.Error(fmt.Sprintf("Failed to add torrent: %s - %s", torrent.ID, torrent.Filename), err)
-				continue
-			}
-
-		}
-
-		instance.logger.Info(fmt.Sprintf("Added entry:	%s [%s]", torrent.Filename, torrent.ID))
-
-		transaction.Exec("RELEASE SAVEPOINT add_entry")
-	}
-
-	err = transaction.Commit()
-	if err != nil {
-		instance.logger.Error("Failed to commit transaction", err)
-		return
 	}
 }
 
-func (instance *Poller) checkRemovedEntries(torrents real_debrid_api.Torrents) {
-	torrentMap := make(map[string]bool)
-	for _, torrent := range torrents {
-		torrentMap[torrent.ID] = true
-	}
-
-	transaction, err := instance.mediaService.NewTransaction()
-	if err != nil {
-		instance.logger.Error("Failed to begin transaction", err)
-		return
-	}
-	defer transaction.Rollback()
-
-	databaseTorrents, err := instance.mediaService.GetTorrents()
-	if err != nil {
-		instance.logger.Error("Failed to get torrents", err)
-		return
-	}
-
-	for _, databaseTorrent := range databaseTorrents {
-		_, ok := torrentMap[databaseTorrent.GetTorrentIdentifier()]
-		if ok {
-			continue
-		}
-
-		instance.logger.Info(fmt.Sprintf("Removing entry:	%s - %s", databaseTorrent.GetTorrentIdentifier(), databaseTorrent.GetName()))
-
-		instance.removeEntry(transaction, databaseTorrent)
-	}
-
-	err = transaction.Commit()
-	if err != nil {
-		instance.logger.Error("Failed to commit transaction", err)
-		return
-	}
+func (p *poller) Stop() {
+	p.cancel()
 }
 
-func (instance *Poller) removeEntry(transaction *sql.Tx, databaseTorrent *media_repository.Torrent) {
-	instance.mediaService.DeleteTorrent(transaction, databaseTorrent)
+func (p *poller) exec() {
+	hash, err := getHash(p.client, p.req, p.element)
+	if err != nil {
+		return
+	}
+
+	if hash != p.lastHash {
+		p.lastHash = hash
+		p.changeFunc(hash)
+	} else {
+		fmt.Println("No change")
+	}
+
+	runtime.GC()
 }
+

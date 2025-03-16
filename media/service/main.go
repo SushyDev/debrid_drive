@@ -225,7 +225,7 @@ func (instance *MediaService) RejectTorrent(transaction *sql.Tx, torrent *real_d
 // 1. Remove torrent files
 // 2. Remove torrent from database
 // 3. Remove torrent from API
-func (instance *MediaService) DeleteTorrent(transaction *sql.Tx, torrent *media_repository.Torrent) error {
+func (instance *MediaService) DeleteTorrent(transaction *sql.Tx, torrent *media_repository.Torrent, remote bool) error {
 	var err error
 
 	err = instance.removeTorrentFiles(transaction, torrent)
@@ -240,10 +240,13 @@ func (instance *MediaService) DeleteTorrent(transaction *sql.Tx, torrent *media_
 		return err
 	}
 
-	err = instance.removeTorrentFromApi(torrent)
-	if err != nil {
-		instance.logger.Error("Failed to delete torrent from api", err)
-		return err
+	// Remove from API
+	if remote {
+		err = instance.removeTorrentFromApi(torrent)
+		if err != nil {
+			instance.logger.Error("Failed to delete torrent from api", err)
+			return err
+		}
 	}
 
 	return nil
@@ -308,4 +311,8 @@ func (instance *MediaService) removeTorrentFromApi(torrent *media_repository.Tor
 
 func (instance *MediaService) GetTorrents() ([]*media_repository.Torrent, error) {
 	return instance.mediaRepository.GetTorrents()
+}
+
+func (instance *MediaService) GetRejectedTorrents() ([]*media_repository.Torrent, error) {
+	return instance.mediaRepository.GetRejectedTorrents()
 }

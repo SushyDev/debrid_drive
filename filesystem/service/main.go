@@ -210,7 +210,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 					return nil, err
 				}
 
-				err = service.mediaManager.DeleteTorrent(transaction, torrent)
+				err = service.mediaManager.DeleteTorrent(transaction, torrent, true)
 				if err != nil {
 					fmt.Printf("Failed to delete torrent: %v\n", err)
 					return nil, err

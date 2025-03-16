@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	ContentType           string `yaml:"content_type"`
+	PollUrl               string `yaml:"poll_url"`
 	PollIntervalSeconds   int    `yaml:"poll_interval_seconds"`
 	Port                  int    `yaml:"port"`
 	RealDebridToken       string `yaml:"real_debrid_token"`
@@ -52,6 +53,12 @@ func GetContentType() string {
 	cfg := get()
 
 	return cfg.ContentType
+}
+
+func GetPollUrl() string {
+	cfg := get()
+
+	return cfg.PollUrl
 }
 
 func GetPollIntervalSeconds() time.Duration {

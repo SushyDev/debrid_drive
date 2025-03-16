@@ -34,7 +34,7 @@ func (mediaRepository *MediaRepository) TorrentExists(torrentId string) (bool, e
 	var exists int
 	err := row.Scan(&exists)
 	if err != nil {
-		return false, mediaRepository.error("Failed to scan data", err)
+		return false, err
 	}
 
 	return exists == 1, nil
@@ -50,7 +50,7 @@ func (mediaRepository *MediaRepository) TorrentRejected(torrentId string) (bool,
 	var exists int
 	err := row.Scan(&exists)
 	if err != nil {
-		return false, mediaRepository.error("Failed to scan data", err)
+		return false, err
 	}
 
 	return exists == 1, nil
@@ -73,7 +73,7 @@ func (mediaRepository *MediaRepository) AddTorrent(transaction *sql.Tx, torrent 
 	)
 
 	if err != nil {
-		return nil, mediaRepository.error("Failed to scan data", err)
+		return nil, err
 	}
 
 	return databaseTorrent, nil
@@ -87,7 +87,7 @@ func (mediaRepository *MediaRepository) RemoveTorrent(transaction *sql.Tx, torre
 
 	_, err := transaction.Exec(query, torrent.identifier)
 	if err != nil {
-		return mediaRepository.error("Failed to delete data", err)
+		return err
 	}
 
 	return nil
@@ -105,7 +105,7 @@ func (mediaRepository *MediaRepository) RejectTorrent(transaction *sql.Tx, torre
 	var identifier uint64
 	err := row.Scan(&identifier)
 	if err != nil {
-		return mediaRepository.error("Failed to scan data", err)
+		return err
 	}
 
 	return nil
@@ -120,15 +120,11 @@ func (mediaRepository *MediaRepository) GetTorrentByTorrentFileId(torrentFileIde
 	`
 
 	row := mediaRepository.database.QueryRow(query, torrentFileIdentifier)
-	torrent := &Torrent{}
 
+	torrent := &Torrent{}
 	err := row.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-
-		return nil, mediaRepository.error("Failed to scan data", err)
+		return nil, err
 	}
 
 	return torrent, nil
@@ -142,16 +138,40 @@ func (mediaRepository *MediaRepository) GetTorrents() ([]*Torrent, error) {
 
 	rows, err := mediaRepository.database.Query(query)
 	if err != nil {
-		return nil, mediaRepository.error("Failed to query data", err)
+		return nil, err
 	}
 
 	torrents := make([]*Torrent, 0)
 	for rows.Next() {
 		torrent := &Torrent{}
-
 		err := rows.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
 		if err != nil {
-			return nil, mediaRepository.error("Failed to scan data", err)
+			return nil, err
+		}
+
+		torrents = append(torrents, torrent)
+	}
+
+	return torrents, nil
+}
+
+func (mediaRepository *MediaRepository) GetRejectedTorrents() ([]*Torrent, error) {
+	query := `
+	SELECT id, torrent_id, name
+	FROM rejected_torrents
+	`
+
+	rows, err := mediaRepository.database.Query(query)
+	if err != nil {
+		return nil, err
+	}
+
+	torrents := make([]*Torrent, 0)
+	for rows.Next() {
+		torrent := &Torrent{}
+		err := rows.Scan(&torrent.identifier, &torrent.torrentIdentifier, &torrent.name)
+		if err != nil {
+			return nil, err
 		}
 
 		torrents = append(torrents, torrent)
