@@ -2,7 +2,6 @@ package poller
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"runtime"
 	"time"
@@ -74,8 +73,6 @@ func (p *poller) exec() {
 	if hash != p.lastHash {
 		p.lastHash = hash
 		p.changeFunc(hash)
-	} else {
-		fmt.Println("No change")
 	}
 
 	runtime.GC()
