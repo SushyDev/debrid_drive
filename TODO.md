@@ -1,6 +1,4 @@
-fvs custom filetype
-    make hardlinks an actual node
-    store temp files (support .plexmatch)
+detect faster updates by querying the http filesystem endpoint of RD
 
 remember and skip rejected id's
 

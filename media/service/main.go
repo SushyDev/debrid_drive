@@ -140,6 +140,12 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 	if config.GetUseFilenameInLister() {
 		// TODO: This breaks if duplicate media in account
 		torrentDirectory = torrent.Filename
+
+		if config.GetUseIdInFilenameLister() {
+			torrentDirectory = fmt.Sprintf("%s [%s]", torrent.Filename, torrent.ID)
+		} else {
+			torrentDirectory = torrent.Filename
+		}
 	} else {
 		torrentDirectory = torrent.ID
 	}
@@ -194,10 +200,10 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 		existingTorrentFile, err := instance.mediaRepository.GetTorrentFileByFileId(fileNode.GetId())
 		if err != nil && err != sql.ErrNoRows {
 			instance.logger.Error("Failed to get torrent file by file id", err)
+			continue
 		}
 
 		if existingTorrentFile != nil {
-			instance.logger.Info("File already exists in database")
 			continue
 		}
 

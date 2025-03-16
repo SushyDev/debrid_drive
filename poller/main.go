@@ -119,7 +119,7 @@ func (instance *Poller) checkNewEntries(torrents real_debrid_api.Torrents) {
 
 		}
 
-		instance.logger.Info(fmt.Sprintf("Added entry:	%s - %s", torrent.ID, torrent.Filename))
+		instance.logger.Info(fmt.Sprintf("Added entry:	%s [%s]", torrent.Filename, torrent.ID))
 
 		transaction.Exec("RELEASE SAVEPOINT add_entry")
 	}

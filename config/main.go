@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	ContentType         string `yaml:"content_type"`
-	PollIntervalSeconds int    `yaml:"poll_interval_seconds"`
-	Port                int    `yaml:"port"`
-	RealDebridToken     string `yaml:"real_debrid_token"`
-	UseFilenameInLister bool   `yaml:"use_filename_in_lister"`
+	ContentType           string `yaml:"content_type"`
+	PollIntervalSeconds   int    `yaml:"poll_interval_seconds"`
+	Port                  int    `yaml:"port"`
+	RealDebridToken       string `yaml:"real_debrid_token"`
+	UseFilenameInLister   bool   `yaml:"use_filename_in_lister"`
+	UseIdInFilenameLister bool   `yaml:"use_id_in_filename_lister"`
 }
 
 func get() Config {
@@ -79,4 +80,10 @@ func GetUseFilenameInLister() bool {
 	cfg := get()
 
 	return cfg.UseFilenameInLister
+}
+
+func GetUseIdInFilenameLister() bool {
+	cfg := get()
+
+	return cfg.UseIdInFilenameLister
 }
