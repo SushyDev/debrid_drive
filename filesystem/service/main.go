@@ -186,7 +186,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 			return nil, api.ToResponseError(syscall.ENOENT)
 		}
 
-		if file.GetMode().IsRegular() || file.GetMode().Type() != fs.ModeSymlink {
+		if !file.GetMode().IsRegular() || file.GetMode().Type() != fs.ModeSymlink {
 			return nil, api.ToResponseError(syscall.EISDIR)
 		}
 
