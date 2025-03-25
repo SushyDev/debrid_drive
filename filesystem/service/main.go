@@ -176,7 +176,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 	}
 
 	switch node.GetMode() {
-	case fs.FileMode(0):
+	case fs.FileMode(0), fs.ModeSymlink:
 		file, err := service.fileSystem.Open(node.GetId())
 		if err != nil && err != sql.ErrNoRows {
 			return nil, api.ToResponseError(err)
@@ -186,7 +186,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 			return nil, api.ToResponseError(syscall.ENOENT)
 		}
 
-		if !file.GetMode().IsRegular() {
+		if file.GetMode().IsRegular() || file.GetMode().Type() != fs.ModeSymlink {
 			return nil, api.ToResponseError(syscall.EISDIR)
 		}
 
@@ -248,6 +248,8 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 		if err != nil {
 			return nil, api.ToResponseError(err)
 		}
+	default :
+		return nil, api.ToResponseError(fmt.Errorf("Unknown file mode %v", node.GetMode()))
 	}
 
 	return &api.RemoveResponse{}, nil

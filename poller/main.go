@@ -12,7 +12,7 @@ type changeFunc func(hash [32]byte)
 type poller struct {
 	url     string
 	element string
-	changeFunc  func(hash [32]byte)
+	action  func(hash [32]byte)
 
 	lastHash [32]byte
 	client   *http.Client
@@ -23,7 +23,7 @@ type poller struct {
 	cancel context.CancelFunc
 }
 
-func New(url string, element string, ticks time.Duration, changeFunc func(hash [32]byte)) *poller {
+func New(url string, element string, ticks time.Duration, action func(hash [32]byte)) *poller {
 	client := setupHttpClient()
 	req := createRequest(url)
 
@@ -32,7 +32,7 @@ func New(url string, element string, ticks time.Duration, changeFunc func(hash [
 	return &poller{
 		url:     url,
 		element: element,
-		changeFunc:  changeFunc,
+		action:  action,
 
 		lastHash: [32]byte{},
 		client:   client,
@@ -72,7 +72,7 @@ func (p *poller) exec() {
 
 	if hash != p.lastHash {
 		p.lastHash = hash
-		p.changeFunc(hash)
+		p.action(hash)
 	}
 
 	runtime.GC()

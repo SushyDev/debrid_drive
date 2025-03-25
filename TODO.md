@@ -1,4 +1,3 @@
-remember and skip rejected id's
+- when streamable file is removed, remove its "magic" symlinks
+- caching for getstreamurl response
 
-configurable poll time
-configurable root folder name
