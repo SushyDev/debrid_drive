@@ -186,10 +186,6 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 			return nil, api.ToResponseError(syscall.ENOENT)
 		}
 
-		if !file.GetMode().IsRegular() || file.GetMode().Type() != fs.ModeSymlink {
-			return nil, api.ToResponseError(syscall.EISDIR)
-		}
-
 		torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
 		if err != nil && err != sql.ErrNoRows {
 			fmt.Printf("Failed to get torrent file by file: %v\n", err)
