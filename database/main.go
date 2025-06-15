@@ -34,6 +34,16 @@ func initializeDatabase() (*sql.DB, error) {
 		return nil, fmt.Errorf("Failed to open database: %v", err)
 	}
 
+	enableWAL(db)
+
+	// Check current journal mode
+	var journalMode string
+	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to check journal mode: %v", err)
+	}
+	fmt.Printf("Journal mode: %s\n", journalMode)
+
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS torrents (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,7 +102,6 @@ func initializeDatabase() (*sql.DB, error) {
 		return nil, fmt.Errorf("Failed to create table: %v", err)
 	}
 
-
 	return db, nil
 }
 
@@ -106,4 +115,18 @@ func (instance *Instance) NewTransaction() (*sql.Tx, error) {
 
 func (instance *Instance) GetDatabase() *sql.DB {
 	return instance.db
+}
+
+func enableWAL(db *sql.DB) error {
+	_, err := db.Exec("PRAGMA journal_mode=WAL")
+	if err != nil {
+		return fmt.Errorf("Failed to enable WAL mode: %v", err)
+	}
+
+	_, err = db.Exec("PRAGMA synchronous=NORMAL")
+	if err != nil {
+		return fmt.Errorf("Failed to set synchronous mode: %v", err)
+	}
+
+	return nil
 }
