@@ -94,7 +94,11 @@ func (service *FileSystemService) getApiNode(node filesystem_interfaces.Node) (*
 
 func (service *FileSystemService) Root(ctx context.Context, req *api.RootRequest) (*api.RootResponse, error) {
 	node, err := filesystem_service.GetRoot(service.fileSystem)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -109,7 +113,11 @@ func (service *FileSystemService) Root(ctx context.Context, req *api.RootRequest
 
 func (service *FileSystemService) ReadDirAll(ctx context.Context, req *api.ReadDirAllRequest) (*api.ReadDirAllResponse, error) {
 	nodes, err := service.fileSystem.ReadDir(req.NodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return &api.ReadDirAllResponse{Nodes: []*api.Node{}}, nil
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -122,12 +130,15 @@ func (service *FileSystemService) ReadDirAll(ctx context.Context, req *api.ReadD
 	return &api.ReadDirAllResponse{
 		Nodes: responseNodes,
 	}, nil
-
 }
 
 func (service *FileSystemService) Lookup(ctx context.Context, req *api.LookupRequest) (*api.LookupResponse, error) {
 	node, err := service.fileSystem.Lookup(req.NodeId, req.Name)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -144,7 +155,11 @@ func (service *FileSystemService) Lookup(ctx context.Context, req *api.LookupReq
 
 func (service *FileSystemService) Create(ctx context.Context, req *api.CreateRequest) (*api.CreateResponse, error) {
 	parentDirectory, err := service.fileSystem.Open(req.ParentNodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -167,7 +182,11 @@ func (service *FileSystemService) Create(ctx context.Context, req *api.CreateReq
 // remove file
 func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveRequest) (*api.RemoveResponse, error) {
 	node, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -178,7 +197,11 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 	switch node.GetMode() {
 	case fs.FileMode(0), fs.ModeSymlink:
 		file, err := service.fileSystem.Open(node.GetId())
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, api.ToResponseError(syscall.ENOENT)
+			}
+
 			return nil, api.ToResponseError(err)
 		}
 
@@ -228,7 +251,11 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 
 	case fs.ModeDir:
 		directory, err := service.fileSystem.Open(node.GetId())
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, api.ToResponseError(syscall.ENOENT)
+			}
+
 			return nil, api.ToResponseError(err)
 		}
 
@@ -253,7 +280,11 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 
 func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameRequest) (*api.RenameResponse, error) {
 	node, err := service.fileSystem.Lookup(req.OldParentNodeId, req.OldName)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -270,7 +301,11 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 		}
 
 		updatedDirectory, err := service.fileSystem.Open(node.GetId())
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, api.ToResponseError(syscall.ENOENT)
+			}
+
 			return nil, api.ToResponseError(err)
 		}
 
@@ -290,7 +325,11 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 		}
 
 		newNode, err := service.fileSystem.Open(node.GetId())
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, api.ToResponseError(syscall.ENOENT)
+			}
+
 			return nil, api.ToResponseError(err)
 		}
 
@@ -306,7 +345,11 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 
 func (service *FileSystemService) Mkdir(ctx context.Context, req *api.MkdirRequest) (*api.MkdirResponse, error) {
 	parentNode, err := service.fileSystem.Open(req.ParentNodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -324,7 +367,11 @@ func (service *FileSystemService) Mkdir(ctx context.Context, req *api.MkdirReque
 	}
 
 	directory, err := service.fileSystem.Lookup(parentNode.GetId(), req.Name)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -348,7 +395,11 @@ func (service *FileSystemService) Link(ctx context.Context, req *api.LinkRequest
 	}
 
 	linkedNode, err := service.fileSystem.Lookup(req.ParentNodeId, req.Name)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -363,7 +414,11 @@ func (service *FileSystemService) Link(ctx context.Context, req *api.LinkRequest
 
 func (service *FileSystemService) ReadFile(ctx context.Context, req *api.ReadFileRequest) (*api.ReadFileResponse, error) {
 	node, err := service.fileSystem.Open(req.NodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -397,7 +452,11 @@ func (service *FileSystemService) ReadFile(ctx context.Context, req *api.ReadFil
 
 func (service *FileSystemService) WriteFile(ctx context.Context, req *api.WriteFileRequest) (*api.WriteFileResponse, error) {
 	node, err := service.fileSystem.Open(req.NodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -414,8 +473,12 @@ func (service *FileSystemService) WriteFile(ctx context.Context, req *api.WriteF
 	}
 
 	content, err := service.fileSystem.ReadFile(node.GetId())
-	if err != nil && err != sql.ErrNoRows {
-		return nil, api.ToResponseError(err)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			content = nil
+		} else {
+			return nil, api.ToResponseError(err)
+		}
 	}
 
 	var data []byte
@@ -450,7 +513,11 @@ func (service *FileSystemService) ReadLink(ctx context.Context, req *api.ReadLin
 
 func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetFileInfoRequest) (*api.GetFileInfoResponse, error) {
 	file, err := service.fileSystem.Open(req.NodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -463,7 +530,11 @@ func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetF
 	}
 
 	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -479,7 +550,11 @@ func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetF
 
 func (service *FileSystemService) GetStreamUrl(ctx context.Context, req *api.GetStreamUrlRequest) (*api.GetStreamUrlResponse, error) {
 	file, err := service.fileSystem.Open(req.NodeId)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
@@ -492,7 +567,11 @@ func (service *FileSystemService) GetStreamUrl(ctx context.Context, req *api.Get
 	}
 
 	torrentFile, err := service.mediaManager.GetTorrentFileByFile(file)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, api.ToResponseError(syscall.ENOENT)
+		}
+
 		return nil, api.ToResponseError(err)
 	}
 
