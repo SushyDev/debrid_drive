@@ -30,6 +30,10 @@ github.com/sushydev/real_debrid_go v1.0.2 h1:8bC14Lm3y7I9L93LEhQPL0S42flxV1j1/jF
 github.com/sushydev/real_debrid_go v1.0.2/go.mod h1:9Tst1Kkq1dDU/ErSYjheu/hJmNmEc0bGdoOy/OGbg4M=
 github.com/sushydev/stream_mount_api v1.1.0 h1:ZYmTcWE0LTl5L0AYQ5kAiAopUFcw1YaFPvc9/ZzI0BA=
 github.com/sushydev/stream_mount_api v1.1.0/go.mod h1:VF1RsSWB3ZlK4ip0cHnByGU8Br9CHqIKEPXtRg/PnGk=
+github.com/sushydev/stream_mount_api v1.2.0 h1:OPva2VmH/tZ1d2039QWdKxwwj2kWl7RKsfBRDpBia0o=
+github.com/sushydev/stream_mount_api v1.2.0/go.mod h1:VF1RsSWB3ZlK4ip0cHnByGU8Br9CHqIKEPXtRg/PnGk=
+github.com/sushydev/vfs_go v1.0.3-0.20250711201031-5ee506940793 h1:uu7hjNIZIc44/A0LKzUC9iyq9tklTkxGJE1X8zeon0U=
+github.com/sushydev/vfs_go v1.0.3-0.20250711201031-5ee506940793/go.mod h1:S8w93l3RTPw5As+YLjAYON2/tmOWHlMtjdCSF4uMWXc=
 github.com/sushydev/vfs_go v1.1.4 h1:l7EJgGgY79WFH9jqI9PZjDi22XoiDPxQwICyWdcEKUI=
 github.com/sushydev/vfs_go v1.1.4/go.mod h1:S8w93l3RTPw5As+YLjAYON2/tmOWHlMtjdCSF4uMWXc=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=

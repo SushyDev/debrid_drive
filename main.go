@@ -35,7 +35,7 @@ func main() {
 		panic(err)
 	}
 
-	fileSystem, err := filesystem.New("./filesystem_test.db")
+	fileSystem, err := filesystem.New("app_data/filesystem.db")
 	if err != nil {
 		logger.Error("Failed to create file system", err)
 		panic(err)

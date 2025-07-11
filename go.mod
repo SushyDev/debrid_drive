@@ -4,8 +4,8 @@ go 1.24.0
 
 require (
 	github.com/sushydev/real_debrid_go v1.0.2
-	github.com/sushydev/stream_mount_api v1.1.0
-	github.com/sushydev/vfs_go v1.1.4
+	github.com/sushydev/stream_mount_api v1.2.0
+	github.com/sushydev/vfs_go v1.0.3-0.20250711201031-5ee506940793
 	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.37.0
 	google.golang.org/grpc v1.71.0
