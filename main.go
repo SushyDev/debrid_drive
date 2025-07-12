@@ -31,35 +31,57 @@ func main() {
 	token := config.GetRealDebridToken()
 	client := real_debrid_go.NewClient(token, &http.Client{})
 
+	logger.Info("Initializing media database...")
 	database, err := database.NewInstance()
 	if err != nil {
-		logger.Error("Failed to create database", err)
-		panic(err)
+		logger.Error("Failed to create media database", err)
+		return
 	}
 
+	logger.Info("Initializing file system database...")
 	fileSystem, err := filesystem.New("app_data/filesystem.db")
 	if err != nil {
-		logger.Error("Failed to create file system", err)
-		panic(err)
+		logger.Error("Failed to create file system database", err)
+		return
 	}
 
-	mediaService := media_repository.NewMediaService(database.GetDatabase())
-	mediaManager := media_service.NewMediaService(client, database, fileSystem, mediaService)
-	fileSystemServer := filesystem_server.NewFileSystemServer(client, fileSystem, mediaManager)
+	mediaRepository := media_repository.NewMediaService(database.GetDatabase())
+	mediaService := media_service.NewMediaService(client, database, fileSystem, mediaRepository)
+	fileSystemServer := filesystem_server.NewFileSystemServer(client, fileSystem, mediaService)
 
+	logger.Info("Starting file system server...")
 	fileSystemServerReady := make(chan struct{})
 	go fileSystemServer.Serve(fileSystemServerReady)
 	<-fileSystemServerReady
+	logger.Info("File system server is ready")
 
+	startPollers(client, mediaRepository, mediaService, fileSystem)
+	logger.Info("Pollers started, waiting for changes...")
+
+	select {} // Block forever, or until a signal is received to stop the application
+}
+
+func startPollers(
+	client *real_debrid_go.Client,
+	mediaRepository *media_repository.MediaRepository,
+	mediaService *media_service.MediaService,
+	fileSystem *filesystem.FileSystem,
+) {
 	// Init actioner
-	actioner := action.New(client, mediaService, mediaManager, fileSystem)
+	actioner := action.New(client, mediaRepository, mediaService, fileSystem)
 
 	// Init new poller
 	pollUrl := config.GetPollUrl()
 	pollInterval := time.Duration(config.GetPollIntervalSeconds()) * time.Second
-	poller := poller.New(pollUrl, "table", pollInterval, func([32]byte) {
+
+	changePoller := poller.NewChangePoller(pollUrl, "table", pollInterval, func([32]byte) {
 		actioner.Poll()
 	})
 
-	poller.Start()
+	timePoller := poller.NewTimePoller(10 * time.Minute, func() {
+		actioner.Poll()
+	})
+
+	go changePoller.Start()
+	go timePoller.Start()
 }
