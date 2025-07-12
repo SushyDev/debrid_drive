@@ -56,7 +56,8 @@ func main() {
 
 	// Init new poller
 	pollUrl := config.GetPollUrl()
-	poller := poller.New(pollUrl, "table", 5*time.Second, func([32]byte) {
+	pollInterval := time.Duration(config.GetPollIntervalSeconds()) * time.Second
+	poller := poller.New(pollUrl, "table", pollInterval, func([32]byte) {
 		actioner.Poll()
 	})
 
