@@ -8,8 +8,8 @@ import (
 	"debrid_drive/logger"
 	api "github.com/sushydev/stream_mount_api"
 
-	media_service "debrid_drive/media/service"
 	filesystem_service "debrid_drive/filesystem/service"
+	media_service "debrid_drive/media/service"
 
 	real_debrid "github.com/sushydev/real_debrid_go"
 	"github.com/sushydev/vfs_go"

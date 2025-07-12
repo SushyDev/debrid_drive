@@ -109,9 +109,11 @@ func renderTableHTML(node *html.Node) string {
 	buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024*10))
 
 	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		html.Render(buffer, c)
+		if err := html.Render(buffer, c); err != nil {
+			// Continue rendering other children even if one fails
+			continue
+		}
 	}
 
 	return buffer.String()
 }
-

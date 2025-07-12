@@ -3,14 +3,12 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
 type Instance struct {
-	db    *sql.DB
-	mutex *sync.Mutex
+	db *sql.DB
 }
 
 func NewInstance() (*Instance, error) {
@@ -34,7 +32,9 @@ func initializeDatabase() (*sql.DB, error) {
 		return nil, fmt.Errorf("Failed to open database: %v", err)
 	}
 
-	enableWAL(db)
+	if err := enableWAL(db); err != nil {
+		return nil, fmt.Errorf("Failed to enable WAL: %v", err)
+	}
 
 	// Check current journal mode
 	var journalMode string
@@ -77,8 +77,8 @@ func initializeDatabase() (*sql.DB, error) {
 			file_index INTEGER NOT NULL,
 			file_node_id INTEGER NOT NULL,
 
-			UNIQUE(torrent_id, file_index)
-			UNIQUE(file_node_id)
+			UNIQUE(torrent_id, file_index),
+			UNIQUE(file_node_id),
 
 			FOREIGN KEY(torrent_id) REFERENCES torrents(id)
 		);

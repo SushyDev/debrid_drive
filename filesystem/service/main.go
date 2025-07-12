@@ -60,7 +60,7 @@ func (service *FileSystemService) isStreamable(node filesystem_interfaces.Node) 
 	}
 }
 
-func (service *FileSystemService) getApiNode(node filesystem_interfaces.Node) (*api.Node) {
+func (service *FileSystemService) getApiNode(node filesystem_interfaces.Node) *api.Node {
 	if node == nil {
 		return nil
 	}
@@ -271,7 +271,7 @@ func (service *FileSystemService) Remove(ctx context.Context, req *api.RemoveReq
 		if err != nil {
 			return nil, api.ToResponseError(err, err)
 		}
-	default :
+	default:
 		return nil, api.ToResponseError(fmt.Errorf(""), fmt.Errorf("Unknown file mode %v", node.GetMode()))
 	}
 
@@ -317,7 +317,7 @@ func (service *FileSystemService) Rename(ctx context.Context, req *api.RenameReq
 			Node: service.getApiNode(updatedDirectory),
 		}, nil
 	} else {
-		fmt.Printf("REGULAR RENAME", req.OldParentNodeId, req.OldName, req.NewName, req.NewParentNodeId)
+		fmt.Printf("REGULAR RENAME: parent=%d old=%s new=%s newParent=%d\n", req.OldParentNodeId, req.OldName, req.NewName, req.NewParentNodeId)
 
 		err := service.fileSystem.Rename(node.GetId(), req.NewName, req.NewParentNodeId)
 		if err != nil {
@@ -495,6 +495,12 @@ func (service *FileSystemService) WriteFile(ctx context.Context, req *api.WriteF
 		return nil, api.ToResponseError(err, err)
 	}
 
+	if n < 0 {
+		return &api.WriteFileResponse{
+			BytesWritten: 0,
+		}, nil
+	}
+
 	return &api.WriteFileResponse{
 		BytesWritten: uint64(n),
 	}, nil
@@ -542,8 +548,13 @@ func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetF
 		return nil, api.ToResponseError(syscall.ENOENT, fmt.Errorf("Torrent file is nil"))
 	}
 
+	size := torrentFile.GetSize()
+	if size < 0 {
+		size = 0
+	}
+
 	return &api.GetFileInfoResponse{
-		Size: uint64(torrentFile.GetSize()),
+		Size: uint64(size),
 		Mode: uint32(file.GetMode()),
 	}, nil
 }

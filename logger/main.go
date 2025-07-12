@@ -2,10 +2,10 @@ package logger
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"log"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

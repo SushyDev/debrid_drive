@@ -139,8 +139,6 @@ func (instance *MediaService) AddTorrent(transaction *sql.Tx, torrent *real_debr
 
 	if config.GetUseFilenameInLister() {
 		// TODO: This breaks if duplicate media in account
-		torrentDirectory = torrent.Filename
-
 		if config.GetUseIdInFilenameLister() {
 			torrentDirectory = fmt.Sprintf("%s [%s]", torrent.Filename, torrent.ID)
 		} else {
