@@ -17,7 +17,13 @@ type Config struct {
 	UseIdInFilenameLister bool   `yaml:"use_id_in_filename_lister"`
 }
 
+var configInstance *Config
+
 func get() Config {
+	if configInstance != nil {
+		return *configInstance
+	}
+
 	file, err := os.Open("config.yml")
 	if err != nil {
 		panic(err)
@@ -29,6 +35,8 @@ func get() Config {
 	if err := decoder.Decode(&cfg); err != nil {
 		panic(err)
 	}
+
+	configInstance = &cfg
 
 	return cfg
 }

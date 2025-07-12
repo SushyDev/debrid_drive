@@ -18,7 +18,7 @@ func NewInstance() (*Instance, error) {
 	}
 
 	if db == nil {
-		return nil, fmt.Errorf("Database is nil")
+		return nil, fmt.Errorf("database is nil")
 	}
 
 	return &Instance{
@@ -29,7 +29,7 @@ func NewInstance() (*Instance, error) {
 func initializeDatabase() (*sql.DB, error) {
 	db, err := sql.Open("sqlite", "app_data/media.db")
 	if err != nil {
-		return nil, fmt.Errorf("Failed to open database: %v", err)
+		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
 	if err := enableWAL(db); err != nil {
@@ -40,10 +40,8 @@ func initializeDatabase() (*sql.DB, error) {
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to check journal mode: %v", err)
+		return nil, fmt.Errorf("failed to check journal mode: %v", err)
 	}
-	fmt.Printf("Journal mode: %s\n", journalMode)
-
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS torrents (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +53,7 @@ func initializeDatabase() (*sql.DB, error) {
 	`)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create table: %v", err)
+		return nil, fmt.Errorf("failed to create table: %v", err)
 	}
 
 	_, err = db.Exec(`
@@ -64,7 +62,7 @@ func initializeDatabase() (*sql.DB, error) {
 	`)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create index: %v", err)
+		return nil, fmt.Errorf("failed to create index: %v", err)
 	}
 
 	_, err = db.Exec(`
@@ -85,7 +83,7 @@ func initializeDatabase() (*sql.DB, error) {
 	`)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create table: %v", err)
+		return nil, fmt.Errorf("failed to create table: %v", err)
 	}
 
 	_, err = db.Exec(`
@@ -99,7 +97,7 @@ func initializeDatabase() (*sql.DB, error) {
 	`)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create table: %v", err)
+		return nil, fmt.Errorf("failed to create table: %v", err)
 	}
 
 	return db, nil
@@ -120,12 +118,12 @@ func (instance *Instance) GetDatabase() *sql.DB {
 func enableWAL(db *sql.DB) error {
 	_, err := db.Exec("PRAGMA journal_mode=WAL")
 	if err != nil {
-		return fmt.Errorf("Failed to enable WAL mode: %v", err)
+		return fmt.Errorf("failed to enable WAL mode: %v", err)
 	}
 
 	_, err = db.Exec("PRAGMA synchronous=NORMAL")
 	if err != nil {
-		return fmt.Errorf("Failed to set synchronous mode: %v", err)
+		return fmt.Errorf("failed to set synchronous mode: %v", err)
 	}
 
 	return nil

@@ -14,7 +14,7 @@ import (
 	"debrid_drive/poller/action"
 
 	"github.com/sushydev/real_debrid_go"
-	"github.com/sushydev/vfs_go"
+	filesystem "github.com/sushydev/vfs_go"
 )
 
 func main() {

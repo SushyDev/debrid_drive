@@ -75,8 +75,14 @@ func (actioner *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent)
 		actioner.logger.Error("Failed to begin transaction", err)
 		return
 	}
+
 	defer func() {
-		if err := transaction.Rollback(); err != nil {
+		if transaction == nil {
+			return
+		}
+
+		err := transaction.Rollback();
+		if err != nil {
 			actioner.logger.Error("Failed to rollback transaction", err)
 		}
 	}()
@@ -152,6 +158,8 @@ func (actioner *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent)
 	if err := transaction.Commit(); err != nil {
 		actioner.logger.Error("Failed to commit transaction", err)
 	}
+
+	transaction = nil
 }
 
 func (a *Actioner) cleanupRemovedEntries(torrents []*real_debrid_api.Torrent) {
@@ -165,8 +173,14 @@ func (a *Actioner) cleanupRemovedEntries(torrents []*real_debrid_api.Torrent) {
 		a.logger.Error("Failed to begin transaction", err)
 		return
 	}
+
 	defer func() {
-		if err := transaction.Rollback(); err != nil {
+		if transaction == nil {
+			return
+		}
+
+		err := transaction.Rollback()
+		if err != nil {
 			a.logger.Error("Failed to rollback transaction", err)
 		}
 	}()
@@ -210,6 +224,8 @@ func (a *Actioner) cleanupRemovedEntries(torrents []*real_debrid_api.Torrent) {
 	if err := transaction.Commit(); err != nil {
 		a.logger.Error("Failed to commit transaction", err)
 	}
+
+	transaction = nil
 }
 
 // Check torrent_files for files that are not in the filesystem
