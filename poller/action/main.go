@@ -43,28 +43,28 @@ func New(
 	}
 }
 
-func (a *Actioner) Poll() {
-	a.logger.Info("Changes detected")
+func (actioner *Actioner) Poll() {
+	actioner.logger.Info("Changes detected")
 
-	torrents, err := real_debrid_api.GetTorrents(a.client, 1000, 1)
+	torrents, err := getAllTorrents(actioner.client, []*real_debrid_api.Torrent{}, 0, 1)
 	if err != nil {
-		a.logger.Error("Failed to get torrents", err)
+		actioner.logger.Error("Failed to get torrents", err)
 		return
 	}
 
 	if torrents == nil {
-		a.logger.Error("Empty torrents response from API", nil)
+		actioner.logger.Error("Empty torrents response from API", nil)
 		return
 	}
 
-	a.processNewEntries(*torrents)
-	a.cleanupRemovedEntries(*torrents)
-	a.checkFiles()
+	actioner.processNewEntries(torrents)
+	actioner.cleanupRemovedEntries(torrents)
+	actioner.checkFiles()
 
-	a.logger.Info("Changes processed")
+	actioner.logger.Info("Changes processed")
 }
 
-func (action *Actioner) processNewEntries(torrents real_debrid_api.Torrents) {
+func (action *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {
 	entries := filterDownloadedEntries(torrents)
 	if len(entries) == 0 {
 		return
@@ -146,7 +146,7 @@ func (action *Actioner) processNewEntries(torrents real_debrid_api.Torrents) {
 	}
 }
 
-func (a *Actioner) cleanupRemovedEntries(torrents real_debrid_api.Torrents) {
+func (a *Actioner) cleanupRemovedEntries(torrents []*real_debrid_api.Torrent) {
 	torrentMap := make(map[string]bool, len(torrents))
 	for _, torrent := range torrents {
 		torrentMap[torrent.ID] = true
@@ -288,7 +288,7 @@ func (a *Actioner) checkFiles() {
 	}
 }
 
-func filterDownloadedEntries(torrents real_debrid_api.Torrents) []*real_debrid_api.Torrent {
+func filterDownloadedEntries(torrents []*real_debrid_api.Torrent) []*real_debrid_api.Torrent {
 	var entries []*real_debrid_api.Torrent
 
 	for _, torrent := range torrents {
@@ -302,3 +302,25 @@ func filterDownloadedEntries(torrents real_debrid_api.Torrents) []*real_debrid_a
 	return entries
 }
 
+func getAllTorrents(client *real_debrid.Client, fetched_torrents []*real_debrid_api.Torrent, total_torrent_count int, page uint) ([]*real_debrid_api.Torrent, error) {
+	const limit = uint(5000)
+
+	torrents, total, err := real_debrid_api.GetTorrents(client, limit, page)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get torrents: %w", err)
+	}
+
+	if torrents == nil {
+		return nil, fmt.Errorf("empty torrents response from API")
+	}
+
+	fetched_torrents = append(fetched_torrents, torrents...)
+
+	if len(fetched_torrents) >= total_torrent_count {
+		fmt.Printf("Fetched %d/%d torrents\n", len(fetched_torrents), total)
+		return fetched_torrents, nil
+	}
+
+	page++
+	return getAllTorrents(client, fetched_torrents, total_torrent_count, page)
+}

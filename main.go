@@ -1,14 +1,15 @@
 package main
 
 import (
+	"net/http"
 	"time"
 
 	"debrid_drive/config"
 	"debrid_drive/database"
-	"debrid_drive/logger"
 	filesystem_server "debrid_drive/filesystem/server"
-	media_service "debrid_drive/media/service"
+	"debrid_drive/logger"
 	media_repository "debrid_drive/media/repository"
+	media_service "debrid_drive/media/service"
 	"debrid_drive/poller"
 	"debrid_drive/poller/action"
 
@@ -25,9 +26,10 @@ func main() {
 	}
 
 	logger.Info("Starting...")
+	logger.Info("Using Poll URL: " + config.GetPollUrl())
 
 	token := config.GetRealDebridToken()
-	client := real_debrid_go.NewClient(token)
+	client := real_debrid_go.NewClient(token, &http.Client{})
 
 	database, err := database.NewInstance()
 	if err != nil {

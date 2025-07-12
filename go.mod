@@ -3,7 +3,7 @@ module debrid_drive
 go 1.24.0
 
 require (
-	github.com/sushydev/real_debrid_go v1.0.2
+	github.com/sushydev/real_debrid_go v1.0.4
 	github.com/sushydev/stream_mount_api v1.2.0
 	github.com/sushydev/vfs_go v1.0.3-0.20250711201031-5ee506940793
 	go.uber.org/zap v1.27.0
