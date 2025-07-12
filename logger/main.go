@@ -1,8 +1,11 @@
 package logger
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"log"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -40,7 +43,7 @@ func createLogger(fileName string) (*zap.SugaredLogger, error) {
 	return logger.Sugar(), nil
 }
 
-func GetLogger(fileName string) (*zap.SugaredLogger, error) {
+func getLogger(fileName string) (*zap.SugaredLogger, error) {
 	if logger, ok := loggers[fileName]; ok {
 		return logger, nil
 	}
@@ -53,4 +56,44 @@ func GetLogger(fileName string) (*zap.SugaredLogger, error) {
 	loggers[fileName] = logger
 
 	return logger, nil
+}
+
+type Logger struct {
+	logger  *zap.SugaredLogger
+	service string
+}
+
+func NewLogger(service string) (*Logger, error) {
+	filename := strings.ToLower(strings.ReplaceAll(service, " ", "_"))
+
+	logger, err := getLogger(filename + ".log")
+	if err != nil {
+		return nil, err
+	}
+
+	return &Logger{
+		logger:  logger,
+		service: service,
+	}, nil
+}
+
+// [Info] ExistingExtraFileService: Found 0 possible extra files, imported 0 files.
+func (instance *Logger) Info(message string) {
+	// replace tabs with spaces
+	loggerMessage := strings.ReplaceAll(message, "\t", " ")
+
+	instance.logger.Infof(loggerMessage)
+
+	formattedMessage := fmt.Sprintf("INFO	%s:	%s", instance.service, message)
+
+	log.Println(formattedMessage)
+}
+
+// [Error] ExistingExtraFileService: Failed to import extra files: failed to read directory: open /path/to/directory: permission denied
+func (instance Logger) Error(message string, err error) {
+	instance.logger.Error(fmt.Sprintf("%s: %v", message, err))
+
+	formattedMessage := fmt.Sprintf("ERROR	%s:	%s: %v", instance.service, message, err)
+
+	log.Println(formattedMessage)
 }

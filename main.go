@@ -1,46 +1,65 @@
 package main
 
 import (
-	"fmt"
+	"net/http"
+	"time"
 
 	"debrid_drive/config"
 	"debrid_drive/database"
-	"debrid_drive/file_system_server"
-	media_manager "debrid_drive/media/manager"
+	filesystem_server "debrid_drive/filesystem/server"
+	"debrid_drive/logger"
+	media_repository "debrid_drive/media/repository"
 	media_service "debrid_drive/media/service"
 	"debrid_drive/poller"
+	"debrid_drive/poller/action"
 
 	"github.com/sushydev/real_debrid_go"
-	vfs "github.com/sushydev/vfs_go"
+	"github.com/sushydev/vfs_go"
 )
 
 func main() {
 	config.Validate()
 
+	logger, err := logger.NewLogger("Main")
+	if err != nil {
+		panic(err)
+	}
+
+	logger.Info("Starting...")
+	logger.Info("Using Poll URL: " + config.GetPollUrl())
+
 	token := config.GetRealDebridToken()
-	client := real_debrid_go.NewClient(token)
+	client := real_debrid_go.NewClient(token, &http.Client{})
 
 	database, err := database.NewInstance()
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create database: %v", err))
+		logger.Error("Failed to create database", err)
+		panic(err)
 	}
 
-	fileSystem, err := vfs.NewFileSystem("debrid_drive", "./filesystem.db")
+	fileSystem, err := filesystem.New("app_data/filesystem.db")
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create file system: %v", err))
+		logger.Error("Failed to create file system", err)
+		panic(err)
 	}
 
-	mediaService := media_service.NewMediaService(database.GetDatabase())
-	mediaManager := media_manager.NewMediaManager(client, database, fileSystem, mediaService)
-	fileSystemServer := file_system_server.NewFileSystemServer(client, fileSystem, mediaManager)
+	mediaService := media_repository.NewMediaService(database.GetDatabase())
+	mediaManager := media_service.NewMediaService(client, database, fileSystem, mediaService)
+	fileSystemServer := filesystem_server.NewFileSystemServer(client, fileSystem, mediaManager)
 
-	go func() {
-		err := fileSystemServer.Serve()
-		if err != nil {
-			panic(fmt.Sprintf("Failed to create API: %v", err))
-		}
-	}()
+	fileSystemServerReady := make(chan struct{})
+	go fileSystemServer.Serve(fileSystemServerReady)
+	<-fileSystemServerReady
 
-	poller := poller.NewPoller(client, mediaManager)
-	poller.Poll()
+	// Init actioner
+	actioner := action.New(client, mediaService, mediaManager, fileSystem)
+
+	// Init new poller
+	pollUrl := config.GetPollUrl()
+	pollInterval := time.Duration(config.GetPollIntervalSeconds()) * time.Second
+	poller := poller.New(pollUrl, "table", pollInterval, func([32]byte) {
+		actioner.Poll()
+	})
+
+	poller.Start()
 }

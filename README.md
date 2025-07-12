@@ -78,6 +78,12 @@ content_type: "application/debrid-drive"
 
 # Your Real Debrid API token
 real_debrid_token: ""
+
+poll_url: "https://my.real-debrid.com/{ID}/torrents/"
+
+# use_filename_in_lister: true # Use debrid "filename" as directory name
+# use_id_in_filename_lister: true # Use debrid "filename [id]" as directory name (Must have `use_filename_in_lister: true`)
+# poll_interval_seconds: 60 # Time inbetween polls for changes on debrid
 ```
 
 #### Done

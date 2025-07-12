@@ -1,4 +1,4 @@
-FROM golang:1.23.2 AS builder
+FROM golang:1.24.0 AS builder
 
 # Set the Current Working Directory inside the container
 WORKDIR /app
@@ -32,6 +32,11 @@ WORKDIR /app
 
 # Copy the Pre-built binary file from the previous stage
 COPY --from=builder /app/main /app/main
+
+RUN adduser -D app
+RUN chown -R app /app
+
+USER app
 
 # Command to run the executable
 ENTRYPOINT ["/app/main"]
