@@ -3,7 +3,6 @@ package poller
 import (
 	"context"
 	"net/http"
-	"runtime"
 	"time"
 )
 
@@ -74,7 +73,5 @@ func (p *poller) exec() {
 		p.lastHash = hash
 		p.action(hash)
 	}
-
-	runtime.GC()
 }
 
