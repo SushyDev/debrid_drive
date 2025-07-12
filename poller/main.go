@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-type changeFunc func(hash [32]byte)
-
 type poller struct {
 	url     string
 	element string
@@ -74,4 +72,3 @@ func (p *poller) exec() {
 		p.action(hash)
 	}
 }
-

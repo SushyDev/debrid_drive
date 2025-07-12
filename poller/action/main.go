@@ -64,22 +64,26 @@ func (actioner *Actioner) Poll() {
 	actioner.logger.Info("Changes processed")
 }
 
-func (action *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {
+func (actioner *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {
 	entries := filterDownloadedEntries(torrents)
 	if len(entries) == 0 {
 		return
 	}
 
-	transaction, err := action.mediaService.NewTransaction()
+	transaction, err := actioner.mediaService.NewTransaction()
 	if err != nil {
-		action.logger.Error("Failed to begin transaction", err)
+		actioner.logger.Error("Failed to begin transaction", err)
 		return
 	}
-	defer transaction.Rollback()
+	defer func() {
+		if err := transaction.Rollback(); err != nil {
+			actioner.logger.Error("Failed to rollback transaction", err)
+		}
+	}()
 
-	existingTorrents, err := action.mediaService.GetTorrents()
+	existingTorrents, err := actioner.mediaService.GetTorrents()
 	if err != nil {
-		action.logger.Error("Failed to fetch existing torrents", err)
+		actioner.logger.Error("Failed to fetch existing torrents", err)
 		return
 	}
 
@@ -88,9 +92,9 @@ func (action *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {
 		existingTorrentMap[t.GetTorrentIdentifier()] = true
 	}
 
-	rejectedTorrents, err := action.mediaService.GetRejectedTorrents()
+	rejectedTorrents, err := actioner.mediaService.GetRejectedTorrents()
 	if err != nil {
-		action.logger.Error("Failed to fetch rejected torrents", err)
+		actioner.logger.Error("Failed to fetch rejected torrents", err)
 		return
 	}
 
@@ -110,39 +114,43 @@ func (action *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {
 
 		_, err := transaction.Exec("SAVEPOINT add_entry")
 		if err != nil {
-			action.logger.Error("Failed to create savepoint", err)
+			actioner.logger.Error("Failed to create savepoint", err)
 			continue
 		}
 
-		err = action.mediaService.AddTorrent(transaction, torrent)
+		err = actioner.mediaService.AddTorrent(transaction, torrent)
 		if err != nil {
 			switch err.(type) {
 			case media_service.TorrentRejectedError:
-				if err := action.mediaService.RejectTorrent(transaction, torrent); err != nil {
-					transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-					action.logger.Error(fmt.Sprintf("Failed to reject torrent: %s", torrent.ID), err)
+				if err := actioner.mediaService.RejectTorrent(transaction, torrent); err != nil {
+					if _, rollbackErr := transaction.Exec("ROLLBACK TO SAVEPOINT add_entry"); rollbackErr != nil {
+						actioner.logger.Error("Failed to rollback to savepoint", rollbackErr)
+					}
+					actioner.logger.Error(fmt.Sprintf("Failed to reject torrent: %s", torrent.ID), err)
 					continue
 				}
 
-				action.logger.Info(fmt.Sprintf("Rejected entry: %s [%s]", torrent.Filename, torrent.ID))
+				actioner.logger.Info(fmt.Sprintf("Rejected entry: %s [%s]", torrent.Filename, torrent.ID))
 			default:
-				transaction.Exec("ROLLBACK TO SAVEPOINT add_entry")
-				action.logger.Error(fmt.Sprintf("Failed to add torrent: %s [%s]", torrent.Filename, torrent.ID), err)
+				if _, rollbackErr := transaction.Exec("ROLLBACK TO SAVEPOINT add_entry"); rollbackErr != nil {
+					actioner.logger.Error("Failed to rollback to savepoint", rollbackErr)
+				}
+				actioner.logger.Error(fmt.Sprintf("Failed to add torrent: %s [%s]", torrent.Filename, torrent.ID), err)
 				continue
 			}
 		}
 
 		_, err = transaction.Exec("RELEASE SAVEPOINT add_entry")
 		if err != nil {
-			action.logger.Error("Failed to release savepoint", err)
+			actioner.logger.Error("Failed to release savepoint", err)
 			continue
 		}
 
-		action.logger.Info(fmt.Sprintf("Added entry: %s [%s]", torrent.Filename, torrent.ID))
+		actioner.logger.Info(fmt.Sprintf("Added entry: %s [%s]", torrent.Filename, torrent.ID))
 	}
 
 	if err := transaction.Commit(); err != nil {
-		action.logger.Error("Failed to commit transaction", err)
+		actioner.logger.Error("Failed to commit transaction", err)
 	}
 }
 
@@ -157,7 +165,11 @@ func (a *Actioner) cleanupRemovedEntries(torrents []*real_debrid_api.Torrent) {
 		a.logger.Error("Failed to begin transaction", err)
 		return
 	}
-	defer transaction.Rollback()
+	defer func() {
+		if err := transaction.Rollback(); err != nil {
+			a.logger.Error("Failed to rollback transaction", err)
+		}
+	}()
 
 	databaseTorrents, err := a.mediaService.GetTorrents()
 	if err != nil {
@@ -237,7 +249,9 @@ func (a *Actioner) checkFiles() {
 			err = a.mediaRepository.RemoveTorrentFile(tx, torrentFile)
 			if err != nil {
 				a.logger.Error("Failed to remove torrent file", err)
-				tx.Rollback()
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					a.logger.Error("Failed to rollback transaction", rollbackErr)
+				}
 				continue
 			}
 
@@ -274,7 +288,9 @@ func (a *Actioner) checkFiles() {
 		err = a.mediaService.DeleteTorrent(tx, databaseTorrent, true)
 		if err != nil {
 			a.logger.Error("Failed to delete torrent", err)
-			tx.Rollback()
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				a.logger.Error("Failed to rollback transaction", rollbackErr)
+			}
 			continue
 		}
 

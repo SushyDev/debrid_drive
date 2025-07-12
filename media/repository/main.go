@@ -3,12 +3,10 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"sync"
 )
 
 type MediaRepository struct {
 	database *sql.DB
-	mutex    *sync.Mutex
 }
 
 func NewMediaService(database *sql.DB) *MediaRepository {
