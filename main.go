@@ -48,13 +48,13 @@ func main() {
 	mediaService := media_service.NewMediaService(client, database, fileSystem, mediaRepository)
 	fileSystemServer := filesystem_server.NewFileSystemServer(client, fileSystem, mediaService)
 
+	startPollers(client, mediaRepository, mediaService, fileSystem, logger)
+
 	logger.Info("Starting file system server...")
 	fileSystemServerReady := make(chan struct{})
 	go fileSystemServer.Serve(fileSystemServerReady)
 	<-fileSystemServerReady
 	logger.Info("File system server is ready")
-
-	startPollers(client, mediaRepository, mediaService, fileSystem, logger)
 
 	select {} // Block forever, or until a signal is received to stop the application
 }
