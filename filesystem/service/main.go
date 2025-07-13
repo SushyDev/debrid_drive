@@ -14,7 +14,7 @@ import (
 	real_debrid "github.com/sushydev/real_debrid_go"
 	real_debrid_api "github.com/sushydev/real_debrid_go/api"
 
-	"github.com/sushydev/vfs_go"
+	filesystem "github.com/sushydev/vfs_go"
 	filesystem_interfaces "github.com/sushydev/vfs_go/interfaces"
 	filesystem_service "github.com/sushydev/vfs_go/service"
 )
@@ -544,10 +544,7 @@ func (service *FileSystemService) GetFileInfo(ctx context.Context, req *api.GetF
 		return nil, api.ToResponseError(syscall.ENOENT, fmt.Errorf("torrent file is nil"))
 	}
 
-	size := torrentFile.GetSize()
-	if size < 0 {
-		size = 0
-	}
+	size := max(torrentFile.GetSize(), 0)
 
 	return &api.GetFileInfoResponse{
 		Size: uint64(size),

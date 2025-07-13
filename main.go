@@ -26,7 +26,6 @@ func main() {
 	}
 
 	logger.Info("Starting...")
-	logger.Info("Using Poll URL: " + config.GetPollUrl())
 
 	token := config.GetRealDebridToken()
 	client := real_debrid_go.NewClient(token, &http.Client{})
@@ -55,8 +54,7 @@ func main() {
 	<-fileSystemServerReady
 	logger.Info("File system server is ready")
 
-	startPollers(client, mediaRepository, mediaService, fileSystem)
-	logger.Info("Pollers started, waiting for changes...")
+	startPollers(client, mediaRepository, mediaService, fileSystem, logger)
 
 	select {} // Block forever, or until a signal is received to stop the application
 }
@@ -66,22 +64,30 @@ func startPollers(
 	mediaRepository *media_repository.MediaRepository,
 	mediaService *media_service.MediaService,
 	fileSystem *filesystem.FileSystem,
+	logger *logger.Logger,
 ) {
-	// Init actioner
+	logger.Info("Initializing actioner...")
 	actioner := action.New(client, mediaRepository, mediaService, fileSystem)
 
-	// Init new poller
+	logger.Info("Running actioner for sync")
+	actioner.Poll()
+
+	logger.Info("Initializing pollers")
 	pollUrl := config.GetPollUrl()
 	pollInterval := config.GetPollIntervalSeconds()
 
+	logger.Info("Initializing change poller with interval: " + pollInterval.String())
 	changePoller := poller.NewChangePoller(pollUrl, "table", pollInterval, func([32]byte) {
 		actioner.Poll()
 	})
 
+	logger.Info("Initializing time poller with interval: " + time.Duration(10*time.Minute).String())
 	timePoller := poller.NewTimePoller(10 * time.Minute, func() {
 		actioner.Poll()
 	})
 
 	go changePoller.Start()
 	go timePoller.Start()
+
+	logger.Info("Pollers started, waiting for changes...")
 }
