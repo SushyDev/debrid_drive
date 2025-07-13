@@ -2,6 +2,7 @@ package action
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"debrid_drive/logger"
 
@@ -21,6 +22,8 @@ type Actioner struct {
 	mediaService    *media_service.MediaService
 	fileSystem      *filesystem.FileSystem
 	logger          *logger.Logger
+
+	running atomic.Bool
 }
 
 func New(
@@ -44,6 +47,11 @@ func New(
 }
 
 func (actioner *Actioner) Poll() {
+	if !actioner.running.CompareAndSwap(false, true) {
+		actioner.logger.Info("Actioner is already running")
+		return
+	}
+
 	actioner.logger.Info("Changes detected")
 
 	torrents, err := getAllTorrents(actioner.client, []*real_debrid_api.Torrent{}, 0, 1)
@@ -62,6 +70,11 @@ func (actioner *Actioner) Poll() {
 	actioner.checkFiles()
 
 	actioner.logger.Info("Changes processed")
+
+	if !actioner.running.CompareAndSwap(true, false) {
+		actioner.logger.Info("Actioner is already stopped")
+		return
+	}
 }
 
 func (actioner *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent) {

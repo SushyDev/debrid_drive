@@ -42,10 +42,10 @@ func NewChangePoller(url string, element string, ticks time.Duration, action fun
 }
 
 func (p *changePoller) Start() {
-	p.exec()
-
 	ticker := time.NewTicker(p.ticks)
 	defer ticker.Stop()
+
+	<- ticker.C
 
 	for {
 		select {
@@ -94,8 +94,6 @@ func NewTimePoller(ticks time.Duration, action func()) *timePoller {
 }
 
 func (p *timePoller) Start() {
-	p.exec()
-
 	ticker := time.NewTicker(p.ticks)
 	defer ticker.Stop()
 
