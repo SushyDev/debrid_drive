@@ -1,42 +1,40 @@
-FROM golang:1.24.0 AS builder
+FROM golang:1.24.0-alpine AS builder
 
-# Set the Current Working Directory inside the container
+RUN apk update && apk add --no-cache \
+    build-base \
+    fuse \
+    bash \
+    git \
+ && apk add --no-cache --virtual .build-deps \
+    gcc \
+    musl-dev \
+ && apk add --no-cache fuse-dev \
+ && rm -rf /var/cache/apk/*
+
+ENV GO111MODULE=on
+ENV GOPROXY=direct
+ENV GOFLAGS="-mod=readonly"
+
 WORKDIR /app
 
-# Copy the go.mod and go.sum files
-COPY go.mod go.sum ./
+COPY app/go.mod app/go.sum ./
 
-# Remove any "replace" directives for local development and tidy dependencies
-RUN grep -v '^replace' go.mod > go.mod.tmp && mv go.mod.tmp go.mod && \
-    go mod tidy && \
-    go mod download
+RUN go mod download
 
-# Copy the source code into the container
-COPY . .
+COPY app .
 
-# Ensure no "replace" directives remain in the go.mod
-RUN grep -v '^replace' go.mod > go.mod.tmp && mv go.mod.tmp go.mod && \
-    go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -o main main.go
 
-# Build the Go app
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/main .
-
-# Stage 2: Run Stage
 FROM alpine:latest
 
-# Install ca-certificates to handle HTTPS requests
-RUN apk add --no-cache ca-certificates
-
-# Set the Current Working Directory inside the container
 WORKDIR /app
 
-# Copy the Pre-built binary file from the previous stage
+RUN apk add --no-cache fuse su-exec
+
 COPY --from=builder /app/main /app/main
 
-RUN adduser -D app
-RUN chown -R app /app
+COPY build/entrypoint.sh /app/entrypoint.sh
 
-USER app
+RUN chmod +x /app/entrypoint.sh
 
-# Command to run the executable
-ENTRYPOINT ["/app/main"]
+ENTRYPOINT ["/app/entrypoint.sh"]
