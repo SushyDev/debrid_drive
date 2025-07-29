@@ -45,7 +45,7 @@ func (p *changePoller) Start() {
 	ticker := time.NewTicker(p.ticks)
 	defer ticker.Stop()
 
-	<- ticker.C
+	<-ticker.C
 
 	for {
 		select {
@@ -97,7 +97,7 @@ func (p *timePoller) Start() {
 	ticker := time.NewTicker(p.ticks)
 	defer ticker.Stop()
 
-	<- ticker.C
+	<-ticker.C
 
 	for {
 		select {

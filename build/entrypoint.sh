@@ -20,7 +20,7 @@ fi
 # This ensures the app can write to its logs, config, etc.
 # Note: We do NOT chown the volume mounts themselves (like /mnt/fvs)
 # The permissions for those are managed on the host.
-chown appuser:appgroup /app
+chown -R $PGID:$PUID /app
 
 # Drop privileges and execute the main application
 echo "Starting application with UID: $PUID, GID: $PGID"

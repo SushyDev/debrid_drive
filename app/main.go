@@ -6,10 +6,10 @@ import (
 
 	"debrid_drive/config"
 	"debrid_drive/database"
-	filesystem_server "debrid_drive/filesystem/server"
 	"debrid_drive/logger"
 	media_repository "debrid_drive/media/repository"
 	media_service "debrid_drive/media/service"
+	filesystem_server "debrid_drive/filesystem/server"
 	"debrid_drive/poller"
 	"debrid_drive/poller/action"
 
@@ -82,7 +82,7 @@ func startPollers(
 	})
 
 	logger.Info("Initializing time poller with interval: " + time.Duration(10*time.Minute).String())
-	timePoller := poller.NewTimePoller(10 * time.Minute, func() {
+	timePoller := poller.NewTimePoller(10*time.Minute, func() {
 		actioner.Poll()
 	})
 

@@ -94,7 +94,7 @@ func (actioner *Actioner) processNewEntries(torrents []*real_debrid_api.Torrent)
 			return
 		}
 
-		err := transaction.Rollback();
+		err := transaction.Rollback()
 		if err != nil {
 			actioner.logger.Error("Failed to rollback transaction", err)
 		}

@@ -2,4 +2,4 @@
 config.yml
 logs
 .DS_Store
-server
+/server

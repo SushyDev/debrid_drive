@@ -16,7 +16,18 @@ var LogDir = "logs"
 var loggers = make(map[string]*zap.SugaredLogger)
 
 func createLogger(fileName string) (*zap.SugaredLogger, error) {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	fmt.Printf("Creating logger for file: %s\n", fileName)
+	fmt.Printf("Working directory: %s\n", workingDir)
+	fmt.Printf("Log directory: %s\n", LogDir)
+	fmt.Printf("Full file path: %s\n", filepath.Join(LogDir, fileName))
+
 	filePath := filepath.Join(LogDir, fileName)
+
 
 	// Create the log directory if it doesn't exist
 	dir := filepath.Dir(filePath)
