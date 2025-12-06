@@ -1,0 +1,193 @@
+defmodule VFSTest do
+  use ExUnit.Case
+
+  alias VFS
+  alias VFS.FileMode
+  alias VFS.Repo
+
+  setup do
+    # Explicitly get a connection checkout for the test
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
+
+    # Get or create root
+    {:ok, root} = VFS.get_root()
+
+    {:ok, root: root}
+  end
+
+  describe "FileMode" do
+    test "directory_mode creates correct mode" do
+      mode = FileMode.directory_mode()
+      assert FileMode.dir?(mode)
+      assert FileMode.permissions(mode) == 0o755
+    end
+
+    test "file_mode creates correct mode" do
+      mode = FileMode.file_mode()
+      assert FileMode.regular?(mode)
+      assert FileMode.permissions(mode) == 0o644
+    end
+
+    test "symlink_mode creates correct mode" do
+      mode = FileMode.symlink_mode()
+      assert FileMode.symlink?(mode)
+    end
+
+    test "custom permissions are preserved" do
+      mode = FileMode.directory_mode(0o700)
+      assert FileMode.dir?(mode)
+      assert FileMode.permissions(mode) == 0o700
+    end
+
+    test "identifies 0o40755 as directory" do
+      mode = 0o40755
+      assert FileMode.dir?(mode)
+      assert FileMode.permissions(mode) == 0o755
+    end
+  end
+
+  describe "tree operations" do
+    test "creates nested directory structure", %{root: root} do
+      {:ok, folder_a} = VFS.create_directory(root.id, "folder_a")
+      {:ok, folder_b} = VFS.create_directory(root.id, "folder_b")
+      {:ok, sub_folder} = VFS.create_directory(folder_a.id, "sub_folder")
+
+      assert FileMode.dir?(folder_a.mode)
+      assert FileMode.dir?(folder_b.mode)
+      assert FileMode.dir?(sub_folder.mode)
+
+      children = VFS.list_children(root.id)
+      assert length(children) == 2
+      assert Enum.any?(children, &(&1.name == "folder_a"))
+      assert Enum.any?(children, &(&1.name == "folder_b"))
+
+      sub_children = VFS.list_children(folder_a.id)
+      assert length(sub_children) == 1
+      assert hd(sub_children).name == "sub_folder"
+    end
+
+    test "moves file from folder A to folder B", %{root: root} do
+      {:ok, folder_a} = VFS.create_directory(root.id, "folder_a")
+      {:ok, folder_b} = VFS.create_directory(root.id, "folder_b")
+      {:ok, file} = VFS.create_file(folder_a.id, "test.txt")
+
+      # Verify file is in folder_a
+      assert {:ok, ^file} = VFS.lookup(folder_a.id, "test.txt")
+
+      # Move file to folder_b
+      {:ok, moved_file} = VFS.move(file.id, folder_b.id, "test.txt")
+
+      # Verify file is now in folder_b
+      assert {:ok, found} = VFS.lookup(folder_b.id, "test.txt")
+      assert found.id == moved_file.id
+
+      # Verify file is not in folder_a anymore
+      assert {:error, :not_found} = VFS.lookup(folder_a.id, "test.txt")
+    end
+
+    test "renames a file", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "old_name.txt")
+
+      {:ok, renamed} = VFS.move(file.id, root.id, "new_name.txt")
+
+      assert {:error, :not_found} = VFS.lookup(root.id, "old_name.txt")
+      assert {:ok, found} = VFS.lookup(root.id, "new_name.txt")
+      assert found.id == renamed.id
+    end
+
+    test "deletes a directory", %{root: root} do
+      {:ok, folder} = VFS.create_directory(root.id, "to_delete")
+
+      :ok = VFS.remove(root.id, folder.name)
+
+      assert {:error, :not_found} = VFS.lookup(root.id, folder.name)
+    end
+
+    test "delete cascades to children", %{root: root} do
+      {:ok, folder} = VFS.create_directory(root.id, "parent")
+      {:ok, child} = VFS.create_directory(folder.id, "child")
+      {:ok, _file} = VFS.create_file(child.id, "file.txt")
+
+      :ok = VFS.remove(root.id, folder.name)
+
+      assert {:error, :not_found} = VFS.lookup(root.id, folder.name)
+      # Child should also be gone due to cascade
+      assert {:error, :not_found} = VFS.get_node(child.id)
+    end
+  end
+
+  describe "I/O operations" do
+    test "writes and reads string data", %{root: root} do
+      content = "Hello, World!"
+      {:ok, file} = VFS.create_file(root.id, "test.txt", data: content)
+
+      {:ok, read_data} = VFS.read_data(file.id)
+      assert read_data == content
+      assert file.size == byte_size(content)
+    end
+
+    test "writes data at offset", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "test.txt", data: "Hello")
+
+      {:ok, updated} = VFS.write_data(file.id, " World", 5)
+
+      {:ok, data} = VFS.read_data(file.id)
+      assert data == "Hello World"
+      assert updated.size == byte_size("Hello World")
+    end
+
+    test "reads with offset and size", %{root: root} do
+      content = "Hello, World!"
+      {:ok, file} = VFS.create_file(root.id, "test.txt", data: content)
+
+      {:ok, data} = VFS.read_data(file.id, 7, 5)
+      assert data == "World"
+    end
+
+    test "writes binary data", %{root: root} do
+      binary = <<1, 2, 3, 4, 5>>
+      {:ok, file} = VFS.create_file(root.id, "binary.dat", data: binary)
+
+      {:ok, read_data} = VFS.read_data(file.id)
+      assert read_data == binary
+    end
+
+    test "overwrites existing data", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "test.txt", data: "Original")
+
+      {:ok, _} = VFS.write_data(file.id, "Modified")
+
+      {:ok, data} = VFS.read_data(file.id)
+      assert data == "Modified"
+    end
+  end
+
+  describe "lookup operations" do
+    test "looks up child by name", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "find_me.txt")
+
+      {:ok, found} = VFS.lookup(root.id, "find_me.txt")
+      assert found.id == file.id
+    end
+
+    test "returns error for non-existent child", %{root: root} do
+      assert {:error, :not_found} = VFS.lookup(root.id, "does_not_exist.txt")
+    end
+  end
+
+  describe "node attributes" do
+    test "file has correct content_type", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "test.json", content_type: "application/json")
+
+      assert file.content_type == "application/json"
+    end
+
+    test "updates node attributes", %{root: root} do
+      {:ok, file} = VFS.create_file(root.id, "test.txt")
+
+      {:ok, updated} = VFS.update_node(file.id, %{content_type: "text/plain"})
+
+      assert updated.content_type == "text/plain"
+    end
+  end
+end

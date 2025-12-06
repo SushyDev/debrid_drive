@@ -1,42 +1,89 @@
-FROM golang:1.24.0 AS builder
+# Stage 1: Build Stage
+FROM hexpm/elixir:1.19.4-erlang-27.3.4.6-alpine-3.21.5 AS builder
 
-# Set the Current Working Directory inside the container
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    build-base \
+    sqlite \
+    sqlite-dev
+
+# Set working directory
 WORKDIR /app
 
-# Copy the go.mod and go.sum files
-COPY go.mod go.sum ./
+# Set build environment
+ENV MIX_ENV=prod
 
-# Remove any "replace" directives for local development and tidy dependencies
-RUN grep -v '^replace' go.mod > go.mod.tmp && mv go.mod.tmp go.mod && \
-    go mod tidy && \
-    go mod download
+# Install hex and rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
 
-# Copy the source code into the container
-COPY . .
+# Copy mix files
+COPY mix.exs mix.lock ./
+COPY config config
+COPY apps/vfs/mix.exs ./apps/vfs/
+COPY apps/sync_engine/mix.exs ./apps/sync_engine/
+COPY apps/grpc_server/mix.exs ./apps/grpc_server/
 
-# Ensure no "replace" directives remain in the go.mod
-RUN grep -v '^replace' go.mod > go.mod.tmp && mv go.mod.tmp go.mod && \
-    go mod tidy
+# Install dependencies
+RUN mix deps.get --only prod
+RUN mix deps.compile
 
-# Build the Go app
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/main .
+# Copy application code
+COPY apps apps
 
-# Stage 2: Run Stage
-FROM alpine:latest
+# Compile the project
+RUN mix compile
 
-# Install ca-certificates to handle HTTPS requests
-RUN apk add --no-cache ca-certificates
+# Build release
+RUN mix release
 
-# Set the Current Working Directory inside the container
+# Stage 2: Runtime Stage
+FROM alpine:3.21.5
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    openssl \
+    ncurses-libs \
+    libstdc++ \
+    sqlite \
+    bash
+
+# Create app user
+RUN addgroup -g 1000 app && \
+    adduser -D -u 1000 -G app app
+
+# Set working directory
 WORKDIR /app
 
-# Copy the Pre-built binary file from the previous stage
-COPY --from=builder /app/main /app/main
+# Copy release from builder
+COPY --from=builder --chown=app:app /app/_build/prod/rel/debrid_stream ./
 
-RUN adduser -D app
-RUN chown -R app /app
+# Copy entrypoint script
+COPY --chown=app:app entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
 
+# Create data directory for SQLite database
+RUN mkdir -p /app/data && chown -R app:app /app/data
+
+# Set environment variables
+ENV HOME=/app
+ENV MIX_ENV=prod
+ENV RELEASE_COOKIE=change_me_in_production
+ENV DATABASE_PATH=/app/data/debrid_stream_prod.db
+
+# Switch to app user
 USER app
 
-# Command to run the executable
-ENTRYPOINT ["/app/main"]
+# Expose gRPC port (default 50051, configurable via GRPC_PORT)
+EXPOSE 50051
+
+# Health check using the built-in health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD /app/bin/debrid_stream rpc "SyncEngine.HealthCheck.ping()" || exit 1
+
+# Use entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default command
+CMD ["/app/bin/debrid_stream", "start"]

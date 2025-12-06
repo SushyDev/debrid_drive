@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package stream_mount_api;
+
+option go_package = "../stream_mount_api";
+
+service FileSystemService {
+	rpc Root(RootRequest) returns (RootResponse);
+	rpc ReadDirAll(ReadDirAllRequest) returns (ReadDirAllResponse);
+	rpc Lookup(LookupRequest) returns (LookupResponse);
+	rpc Create(CreateRequest) returns (CreateResponse);
+	rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+	rpc Remove(RemoveRequest) returns (RemoveResponse);
+	rpc Rename(RenameRequest) returns (RenameResponse);
+	rpc Link(LinkRequest) returns (LinkResponse);
+
+	rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+	rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+
+	rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);
+	rpc GetStreamUrl(GetStreamUrlRequest) returns (GetStreamUrlResponse);
+}
+
+message RootRequest {}
+
+message RootResponse {
+	Node root = 1;
+}
+
+message ReadDirAllRequest {
+	uint64 node_id = 1;
+}
+
+message ReadDirAllResponse {
+	repeated Node nodes = 1;
+}
+
+message LookupRequest {
+	uint64 node_id = 1;
+	string name = 2;
+}
+
+message LookupResponse {
+	Node node = 1;
+}
+message CreateRequest {
+	uint64 parent_node_id = 1;
+	string name = 2;
+	uint32 mode = 3;
+}
+
+message CreateResponse {}
+
+message MkdirRequest {
+	uint64 parent_node_id = 1;
+	string name = 2;
+}
+
+message MkdirResponse {
+	Node node = 1;
+}
+
+message RemoveRequest {
+	uint64 parent_node_id = 1;
+	string name = 2;
+}
+
+message RemoveResponse {}
+
+message RenameRequest {
+	uint64 old_parent_node_id = 1;
+	string old_name = 2;
+	uint64 new_parent_node_id = 3;
+	string new_name = 4;
+}
+
+message RenameResponse {
+	Node node = 1;
+}
+
+message LinkRequest {
+	uint64 node_id = 1;
+	uint64 parent_node_id = 2;
+	string name = 3;
+}
+
+message LinkResponse {
+	Node node = 1;
+}
+
+message GetFileInfoRequest {
+	uint64 node_id = 1;
+}
+
+message GetFileInfoResponse {
+	uint64 size = 1;
+	uint32 mode = 2;
+}
+
+message GetStreamUrlRequest {
+	uint64 node_id = 1;
+}
+
+message GetStreamUrlResponse {
+	string url = 1;
+}
+
+message ReadFileRequest {
+	uint64 node_id = 1;
+	uint64 offset = 2;
+	uint64 size = 3;
+}
+
+message ReadFileResponse {
+	bytes data = 1;
+}
+
+message WriteFileRequest {
+	uint64 node_id = 1;
+	uint64 offset = 2;
+	bytes data = 3;
+}
+
+message WriteFileResponse {
+	uint64 bytes_written = 1;
+}
+
+message Node {
+	uint64 id = 1;
+	string name = 2;
+	uint32 mode = 3;
+	bool streamable = 4;
+}

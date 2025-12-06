@@ -1,0 +1,605 @@
+defmodule GrpcServer.E2E.StreamUrlTest do
+  @moduledoc """
+  Tests for GetStreamUrl RPC and symlink operations.
+
+  Note: These tests focus on error paths and symlink resolution logic.
+  Full end-to-end testing with Real Debrid would require mocking or integration tests.
+  """
+  use ExUnit.Case, async: false
+
+  import GrpcServer.Test.GrpcClientHelper
+
+  alias VFS
+  alias VFS.FileMode
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+
+    channel = connect()
+
+    on_exit(fn ->
+      disconnect(channel)
+    end)
+
+    {:ok, channel: channel}
+  end
+
+  describe "GetStreamUrl - Error cases" do
+    test "returns not_found for non-existent node", %{channel: channel} do
+      non_existent_id = 999_999
+
+      assert {:error, %GRPC.RPCError{status: 5}} =
+               get_stream_url(channel, non_existent_id)
+    end
+
+    test "returns not_found for directory node", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, dir_resp} = mkdir(channel, root_id, "test_dir")
+      dir_id = dir_resp.node.id
+
+      # Directories cannot be streamed
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, dir_id)
+    end
+
+    test "returns failed_precondition for non-streamable file", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a regular file (not streamable type)
+      {:ok, create_resp} = create_file(channel, root_id, "regular.txt")
+      file_id = create_resp.node.id
+
+      # Regular files without torrent data cannot be streamed
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, file_id)
+    end
+
+    test "can create streamable file directly via VFS", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a streamable file directly through VFS
+      {:ok, streamable_node} =
+        VFS.create_file(root_id, "streamable.mkv", content_type: "sync_engine/streamable")
+
+      # Verify it's marked as streamable in the proto response
+      {:ok, lookup_resp} = lookup(channel, root_id, "streamable.mkv")
+      assert lookup_resp.node.streamable == true
+
+      # Note: Would return failed_precondition because no torrent_file exists
+      # In real usage, torrent_files are created by the sync_engine sync process
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, streamable_node.id)
+    end
+  end
+
+  describe "Symlink operations - ReadLink" do
+    test "can create and read a symlink", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a target file
+      {:ok, target_resp} = create_file(channel, root_id, "target.txt")
+      target_id = target_resp.node.id
+
+      # Create a symlink via VFS (pointing to target's node ID)
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "link_to_target", Integer.to_string(target_id))
+
+      # Read the symlink
+      {:ok, read_link_resp} = read_link(channel, symlink_node.id)
+      assert read_link_resp.path == Integer.to_string(target_id)
+    end
+
+    test "read_link fails on non-symlink", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, file_resp} = create_file(channel, root_id, "regular.txt")
+      file_id = file_resp.node.id
+
+      # Should fail with invalid_argument
+      assert {:error, %GRPC.RPCError{status: 3, message: "Not a symlink"}} =
+               read_link(channel, file_id)
+    end
+
+    test "read_link fails on directory", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, dir_resp} = mkdir(channel, root_id, "test_dir")
+      dir_id = dir_resp.node.id
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Not a symlink"}} =
+               read_link(channel, dir_id)
+    end
+
+    test "read_link fails on non-existent node", %{channel: channel} do
+      assert {:error, %GRPC.RPCError{status: 5}} =
+               read_link(channel, 999_999)
+    end
+  end
+
+  describe "Symlink with GetStreamUrl" do
+    test "symlink to streamable file follows the link", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a streamable target file
+      {:ok, target_node} =
+        VFS.create_file(root_id, "movie.mkv", content_type: "sync_engine/streamable")
+
+      # Create symlink to the streamable file
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "link_to_movie", Integer.to_string(target_node.id))
+
+      # Verify symlink exists
+      {:ok, lookup_resp} = lookup(channel, root_id, "link_to_movie")
+      assert lookup_resp.node.id == symlink_node.id
+
+      # Note: Would return failed_precondition because no torrent_file exists
+      # But the symlink resolution logic would work if torrent_file existed
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, symlink_node.id)
+    end
+
+    test "symlink to non-streamable file returns error", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a regular (non-streamable) target file
+      {:ok, target_resp} = create_file(channel, root_id, "regular.txt")
+      target_id = target_resp.node.id
+
+      # Create symlink to the regular file
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "link_to_regular", Integer.to_string(target_id))
+
+      # Should return failed_precondition (not streamable)
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, symlink_node.id)
+    end
+
+    test "symlink to directory returns error", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a directory
+      {:ok, dir_resp} = mkdir(channel, root_id, "some_dir")
+      dir_id = dir_resp.node.id
+
+      # Create symlink to the directory
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "link_to_dir", Integer.to_string(dir_id))
+
+      # Should return failed_precondition (not streamable)
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, symlink_node.id)
+    end
+
+    test "symlink to non-existent target returns error", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create symlink to non-existent node
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "broken_link", "999999")
+
+      # Should return not_found (target doesn't exist)
+      assert {:error, %GRPC.RPCError{status: 5}} =
+               get_stream_url(channel, symlink_node.id)
+    end
+
+    test "symlink with invalid target format returns error", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create symlink with path-based target (not yet supported)
+      {:ok, symlink_node} =
+        VFS.create_symlink(root_id, "path_link", "/some/path/file.mkv")
+
+      # Should return failed_precondition (path-based symlinks not supported)
+      assert {:error, %GRPC.RPCError{status: 9}} =
+               get_stream_url(channel, symlink_node.id)
+    end
+  end
+
+  describe "ReadDirAll validation" do
+    test "returns not_found for non-existent directory", %{channel: channel} do
+      assert {:error, %GRPC.RPCError{status: 5, message: "Node not found"}} =
+               read_dir_all(channel, 999_999)
+    end
+
+    test "returns invalid_argument when called on a file", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, file_resp} = create_file(channel, root_id, "test.txt")
+      file_id = file_resp.node.id
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Not a directory"}} =
+               read_dir_all(channel, file_id)
+    end
+  end
+
+  describe "Name validation" do
+    test "rejects empty filename", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Name cannot be empty"}} =
+               create_file(channel, root_id, "")
+    end
+
+    test "rejects filename with path separator", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Name cannot contain path separator"}} =
+               create_file(channel, root_id, "path/to/file.txt")
+    end
+
+    test "rejects filename with null byte", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Name cannot contain null bytes"}} =
+               create_file(channel, root_id, "file\0name.txt")
+    end
+
+    test "rejects filename exceeding maximum length", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      long_name = String.duplicate("a", 256)
+
+      assert {:error, %GRPC.RPCError{status: 3, message: "Name exceeds maximum length"}} =
+               create_file(channel, root_id, long_name)
+    end
+
+    test "accepts filename at maximum length", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      max_length_name = String.duplicate("a", 255)
+
+      assert {:ok, _} = create_file(channel, root_id, max_length_name)
+    end
+  end
+
+  describe "Link RPC - Symlink creation" do
+    test "can create a symlink to a regular file", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a target file
+      {:ok, file_resp} = create_file(channel, root_id, "target.txt")
+      target_id = file_resp.node.id
+
+      # Create symlink to the file
+      request = %StreamMountApi.LinkRequest{
+        node_id: target_id,
+        parent_node_id: root_id,
+        name: "link_to_target"
+      }
+
+      assert {:ok, link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+      assert link_resp.node.name == "link_to_target"
+      assert FileMode.symlink?(link_resp.node.mode)
+
+      # Verify we can look up the symlink
+      {:ok, lookup_resp} = lookup(channel, root_id, "link_to_target")
+      assert lookup_resp.node.id == link_resp.node.id
+    end
+
+    test "can create a symlink to a streamable file", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a streamable file
+      {:ok, streamable_node} =
+        VFS.create_file(root_id, "video.mkv", content_type: "sync_engine/streamable")
+
+      # Create symlink to the streamable file
+      request = %StreamMountApi.LinkRequest{
+        node_id: streamable_node.id,
+        parent_node_id: root_id,
+        name: "link_to_video"
+      }
+
+      assert {:ok, _link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+
+      # The symlink itself should be marked as streamable (since it points to streamable)
+      {:ok, lookup_resp} = lookup(channel, root_id, "link_to_video")
+      assert lookup_resp.node.streamable == true
+    end
+
+    test "symlink to streamable file supports get_stream_url", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a streamable file
+      {:ok, streamable_node} =
+        VFS.create_file(root_id, "movie.mkv", content_type: "sync_engine/streamable")
+
+      # Create symlink
+      request = %StreamMountApi.LinkRequest{
+        node_id: streamable_node.id,
+        parent_node_id: root_id,
+        name: "link_to_movie"
+      }
+
+      {:ok, link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+      link_id = link_resp.node.id
+
+      # Should return failed_precondition because no torrent_file exists
+      # but this proves the symlink resolution works
+      assert {:error, %GRPC.RPCError{status: 9}} = get_stream_url(channel, link_id)
+    end
+
+    test "returns error when target node doesn't exist", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Try to create symlink to non-existent node
+      request = %StreamMountApi.LinkRequest{
+        node_id: 999_999,
+        parent_node_id: root_id,
+        name: "broken_link"
+      }
+
+      assert {:error, %GRPC.RPCError{status: 5, message: "Target node not found"}} =
+               StreamMountApi.FileSystemService.Stub.link(channel, request)
+    end
+
+    test "returns error for invalid name", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, file_resp} = create_file(channel, root_id, "target.txt")
+      target_id = file_resp.node.id
+
+      # Try to create symlink with invalid name (contains /)
+      request = %StreamMountApi.LinkRequest{
+        node_id: target_id,
+        parent_node_id: root_id,
+        name: "link/with/slash"
+      }
+
+      assert {:error, %GRPC.RPCError{status: 3}} =
+               StreamMountApi.FileSystemService.Stub.link(channel, request)
+    end
+
+    test "returns error for duplicate name", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      {:ok, file_resp} = create_file(channel, root_id, "target.txt")
+      target_id = file_resp.node.id
+
+      # Create first symlink
+      request = %StreamMountApi.LinkRequest{
+        node_id: target_id,
+        parent_node_id: root_id,
+        name: "duplicate"
+      }
+
+      {:ok, _link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+
+      # Try to create another symlink with same name
+      assert {:error, %GRPC.RPCError{status: 3}} =
+               StreamMountApi.FileSystemService.Stub.link(channel, request)
+    end
+  end
+
+  describe "Link cascade deletion" do
+    test "deleting parent deletes symlink", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a directory
+      {:ok, dir_resp} = mkdir(channel, root_id, "parent_dir")
+      dir_id = dir_resp.node.id
+
+      # Create a target file in root
+      {:ok, file_resp} = create_file(channel, root_id, "target.txt")
+      target_id = file_resp.node.id
+
+      # Create symlink in the directory
+      request = %StreamMountApi.LinkRequest{
+        node_id: target_id,
+        parent_node_id: dir_id,
+        name: "link_to_target"
+      }
+
+      {:ok, link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+      link_id = link_resp.node.id
+
+      # Verify symlink exists
+      assert {:ok, _} = lookup(channel, dir_id, "link_to_target")
+
+      # Delete parent directory
+      assert {:ok, _} = remove(channel, root_id, "parent_dir")
+
+      # Verify symlink is gone (lookup via node ID should fail)
+      assert {:error, :not_found} = VFS.get_node(link_id)
+
+      # Target file should still exist
+      {:ok, lookup_resp} = lookup(channel, root_id, "target.txt")
+      assert lookup_resp.node.id == target_id
+    end
+
+    test "deleting target doesn't delete symlink but makes it broken", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create a target file
+      {:ok, file_resp} = create_file(channel, root_id, "target.txt")
+      target_id = file_resp.node.id
+
+      # Create symlink
+      request = %StreamMountApi.LinkRequest{
+        node_id: target_id,
+        parent_node_id: root_id,
+        name: "link_to_target"
+      }
+
+      {:ok, link_resp} = StreamMountApi.FileSystemService.Stub.link(channel, request)
+      link_id = link_resp.node.id
+
+      # Delete target file
+      assert {:ok, _} = remove(channel, root_id, "target.txt")
+
+      # Symlink should still exist
+      {:ok, lookup_resp} = lookup(channel, root_id, "link_to_target")
+      assert lookup_resp.node.id == link_id
+
+      # But reading it should fail (broken symlink)
+      {:ok, symlink_node} = VFS.get_node(link_id)
+      assert {:error, :not_found} = VFS.get_node(String.to_integer(symlink_node.data))
+    end
+  end
+
+  describe "Symlink chains" do
+    test "symlink can point to another symlink (chain of symlinks)", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create target file
+      {:ok, target_resp} = create_file(channel, root_id, "target.txt")
+      target_id = target_resp.node.id
+
+      # Create first symlink pointing to target
+      {:ok, link1_resp} = create_link(channel, target_id, root_id, "link1")
+      link1_id = link1_resp.node.id
+
+      # Create second symlink pointing to first symlink
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # Verify link2 points to link1
+      {:ok, read_resp} = read_link(channel, link2_id)
+      assert read_resp.path == to_string(link1_id)
+
+      # Verify link1 points to target
+      {:ok, read_resp} = read_link(channel, link1_id)
+      assert read_resp.path == to_string(target_id)
+    end
+
+    test "streamable symlink chain (link2 -> link1 -> streamable_file)", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create streamable file
+      {:ok, streamable_node} =
+        VFS.create_file(root_id, "video.mkv", content_type: "sync_engine/streamable")
+
+      # Create first symlink pointing to streamable file
+      {:ok, link1_resp} = create_link(channel, streamable_node.id, root_id, "link1")
+      link1_id = link1_resp.node.id
+
+      # Create second symlink pointing to first symlink
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # Both symlinks should be marked as streamable
+      {:ok, lookup_resp} = lookup(channel, root_id, "link1")
+      assert lookup_resp.node.streamable == true
+
+      {:ok, lookup_resp} = lookup(channel, root_id, "link2")
+      assert lookup_resp.node.streamable == true
+
+      # get_stream_url should work through the chain
+      # (will fail with failed_precondition since no torrent_file exists, but proves chain works)
+      assert {:error, %GRPC.RPCError{status: 9}} = get_stream_url(channel, link2_id)
+    end
+
+    test "deleting intermediate symlink breaks the chain", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create target file
+      {:ok, target_resp} = create_file(channel, root_id, "target.txt")
+      target_id = target_resp.node.id
+
+      # Create chain: link2 -> link1 -> target
+      {:ok, link1_resp} = create_link(channel, target_id, root_id, "link1")
+      link1_id = link1_resp.node.id
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # Delete link1 (intermediate link)
+      assert {:ok, _} = remove(channel, root_id, "link1")
+
+      # link2 should still exist but is now broken
+      {:ok, link2_node} = VFS.get_node(link2_id)
+      assert FileMode.symlink?(link2_node.mode)
+
+      # But the target it points to (link1) is gone
+      assert {:error, :not_found} = VFS.get_node(String.to_integer(link2_node.data))
+    end
+
+    test "deleting final target breaks all symlinks in chain", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create streamable file
+      {:ok, streamable_node} =
+        VFS.create_file(root_id, "video.mkv", content_type: "sync_engine/streamable")
+
+      # Create chain: link2 -> link1 -> streamable_file
+      {:ok, link1_resp} = create_link(channel, streamable_node.id, root_id, "link1")
+      link1_id = link1_resp.node.id
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # Verify both are streamable before deletion
+      {:ok, lookup_resp} = lookup(channel, root_id, "link1")
+      assert lookup_resp.node.streamable == true
+      {:ok, lookup_resp} = lookup(channel, root_id, "link2")
+      assert lookup_resp.node.streamable == true
+
+      # Delete the final target (streamable file)
+      assert {:ok, _} = VFS.remove(streamable_node.id)
+
+      # Both symlinks should still exist
+      {:ok, link1_node} = VFS.get_node(link1_id)
+      assert FileMode.symlink?(link1_node.mode)
+      {:ok, link2_node} = VFS.get_node(link2_id)
+      assert FileMode.symlink?(link2_node.mode)
+
+      # But they should no longer be marked as streamable (broken chain)
+      {:ok, lookup_resp} = lookup(channel, root_id, "link1")
+      assert lookup_resp.node.streamable == false
+      {:ok, lookup_resp} = lookup(channel, root_id, "link2")
+      assert lookup_resp.node.streamable == false
+    end
+
+    test "circular symlink detection (link1 -> link2 -> link1)", %{channel: channel} do
+      {:ok, root_resp} = get_root(channel)
+      root_id = root_resp.root.id
+
+      # Create first symlink pointing to a placeholder
+      {:ok, target_resp} = create_file(channel, root_id, "placeholder.txt")
+      {:ok, link1_resp} = create_link(channel, target_resp.node.id, root_id, "link1")
+      link1_id = link1_resp.node.id
+
+      # Create second symlink pointing to first
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # Manually create a cycle by updating link1 to point to link2
+      # This simulates a circular reference
+      {:ok, _updated} = VFS.update_node(link1_id, %{data: to_string(link2_id)})
+
+      # Checking streamability should not hang (should detect cycle or handle gracefully)
+      {:ok, lookup_resp} = lookup(channel, root_id, "link1")
+      # Should return false for streamable (broken/circular reference)
+      assert lookup_resp.node.streamable == false
+    end
+  end
+end
