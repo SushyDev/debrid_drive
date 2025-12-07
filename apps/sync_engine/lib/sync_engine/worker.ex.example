@@ -1,0 +1,54 @@
+defmodule DebridDrive.Worker do
+  @moduledoc """
+  Placeholder GenServer for business logic.
+
+  This worker can be used to interact with external APIs
+  and populate the VFS with data.
+  """
+
+  use GenServer
+  require Logger
+
+  alias StreamMount.VFS
+
+  ## Client API
+
+  @doc """
+  Starts the Worker.
+  """
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @doc """
+  Simulates fetching data from an external API and storing it in the VFS.
+  """
+  def fetch_and_store(filename, content) do
+    GenServer.call(__MODULE__, {:fetch_and_store, filename, content})
+  end
+
+  ## Server Callbacks
+
+  @impl true
+  def init(_opts) do
+    Logger.info("DebridDrive.Worker started")
+    {:ok, %{}}
+  end
+
+  @impl true
+  def handle_call({:fetch_and_store, filename, content}, _from, state) do
+    # Get root node
+    {:ok, root} = VFS.get_root()
+
+    # Create a file in the root directory
+    case VFS.create_file(root.id, filename, data: content) do
+      {:ok, file} ->
+        Logger.info("Created file: #{filename} (ID: #{file.id})")
+        {:reply, {:ok, file}, state}
+
+      {:error, reason} ->
+        Logger.error("Failed to create file: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
+    end
+  end
+end

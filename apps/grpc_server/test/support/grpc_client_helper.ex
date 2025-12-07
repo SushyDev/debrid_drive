@@ -1,0 +1,211 @@
+defmodule GrpcServer.Test.GrpcClientHelper do
+  @moduledoc """
+  Helper module for creating and managing gRPC test clients.
+  Provides utilities for connecting to the gRPC server during tests.
+  """
+
+  alias GRPC.Stub
+  alias StreamMountApi.FileSystemService.Stub, as: FileSystemStub
+
+  alias StreamMountApi.{
+    RootRequest,
+    ReadDirAllRequest,
+    LookupRequest,
+    CreateRequest,
+    MkdirRequest,
+    RemoveRequest,
+    RenameRequest,
+    LinkRequest,
+    SetattrRequest,
+    ReadFileRequest,
+    WriteFileRequest,
+    GetFileInfoRequest,
+    GetStreamUrlRequest
+  }
+
+  @default_host "localhost"
+  # Default port - in tests this will be overridden by Application env
+  @default_port 50051
+
+  @doc """
+  Connects to the gRPC server and returns a channel.
+  In test environment, automatically uses the dynamically assigned test port.
+  """
+  def connect(opts \\ []) do
+    host = Keyword.get(opts, :host, @default_host)
+    # In test env, get the actual port from application env (set by test_helper)
+    # Otherwise use the provided port or default
+    port =
+      case Mix.env() do
+        :test ->
+          Application.get_env(:grpc_server, :test_port, Keyword.get(opts, :port, @default_port))
+
+        _ ->
+          Keyword.get(opts, :port, @default_port)
+      end
+
+    {:ok, channel} = Stub.connect("#{host}:#{port}")
+    channel
+  end
+
+  @doc """
+  Disconnects from the gRPC server.
+  """
+  def disconnect(channel) do
+    Stub.disconnect(channel)
+  end
+
+  @doc """
+  Gets the root node.
+  """
+  def get_root(channel) do
+    request = %RootRequest{}
+    FileSystemStub.root(channel, request)
+  end
+
+  @doc """
+  Lists all children of a directory.
+  """
+  def read_dir_all(channel, node_id) do
+    request = %ReadDirAllRequest{node_id: node_id}
+    FileSystemStub.read_dir_all(channel, request)
+  end
+
+  @doc """
+  Looks up a child node by name.
+  """
+  def lookup(channel, node_id, name) do
+    request = %LookupRequest{node_id: node_id, name: name}
+    FileSystemStub.lookup(channel, request)
+  end
+
+  @doc """
+  Creates a new file.
+  """
+  def create_file(channel, parent_id, name, mode \\ 0o644) do
+    request = %CreateRequest{parent_node_id: parent_id, name: name, mode: mode}
+    FileSystemStub.create(channel, request)
+  end
+
+  @doc """
+  Creates a new directory.
+  """
+  def mkdir(channel, parent_id, name) do
+    request = %MkdirRequest{parent_node_id: parent_id, name: name}
+    FileSystemStub.mkdir(channel, request)
+  end
+
+  @doc """
+  Removes a node by name.
+  """
+  def remove(channel, parent_id, name) do
+    request = %RemoveRequest{parent_node_id: parent_id, name: name}
+    FileSystemStub.remove(channel, request)
+  end
+
+  @doc """
+  Renames/moves a node.
+  """
+  def rename(channel, old_parent_id, old_name, new_parent_id, new_name) do
+    request = %RenameRequest{
+      old_parent_node_id: old_parent_id,
+      old_name: old_name,
+      new_parent_node_id: new_parent_id,
+      new_name: new_name
+    }
+
+    FileSystemStub.rename(channel, request)
+  end
+
+  @doc """
+  Creates a hard link to an existing node.
+  """
+  def create_link(channel, target_node_id, parent_id, name) do
+    request = %LinkRequest{node_id: target_node_id, parent_node_id: parent_id, name: name}
+    FileSystemStub.link(channel, request)
+  end
+
+  @doc """
+  Reads file data.
+  """
+  def read_file(channel, node_id, offset \\ 0, size \\ 0) do
+    request = %ReadFileRequest{node_id: node_id, offset: offset, size: size}
+    FileSystemStub.read_file(channel, request)
+  end
+
+  @doc """
+  Writes file data.
+  """
+  def write_file(channel, node_id, data, offset \\ 0) do
+    request = %WriteFileRequest{node_id: node_id, offset: offset, data: data}
+    FileSystemStub.write_file(channel, request)
+  end
+
+  @doc """
+  Gets file information.
+  """
+  def get_file_info(channel, node_id) do
+    request = %GetFileInfoRequest{node_id: node_id}
+    FileSystemStub.get_file_info(channel, request)
+  end
+
+  @doc """
+  Gets a streaming URL for a file.
+  """
+  def get_stream_url(channel, node_id) do
+    request = %GetStreamUrlRequest{node_id: node_id}
+    FileSystemStub.get_stream_url(channel, request)
+  end
+
+  @doc """
+  Sets file attributes (mode, size, timestamps, ownership).
+  """
+  def setattr(channel, node_id, opts \\ []) do
+    request = %SetattrRequest{
+      node_id: node_id,
+      mode: opts[:mode],
+      size: opts[:size],
+      atime: opts[:atime],
+      atime_nsec: opts[:atime_nsec],
+      mtime: opts[:mtime],
+      mtime_nsec: opts[:mtime_nsec],
+      uid: opts[:uid],
+      gid: opts[:gid]
+    }
+
+    FileSystemStub.setattr(channel, request)
+  end
+
+  @doc """
+  Helper to extract node ID from a response.
+  """
+  def get_node_id(%{node: %{id: id}}), do: id
+  def get_node_id(%{root: %{id: id}}), do: id
+
+  @doc """
+  Helper to create a full directory path.
+  Creates nested directories and returns the final directory node ID.
+  """
+  def mkdir_p(channel, parent_id, path_parts) when is_list(path_parts) do
+    Enum.reduce(path_parts, {:ok, parent_id}, fn name, {:ok, current_parent_id} ->
+      case mkdir(channel, current_parent_id, name) do
+        {:ok, %{node: node}} -> {:ok, node.id}
+        error -> error
+      end
+    end)
+  end
+
+  @doc """
+  Helper to write and verify file content.
+  """
+  def write_and_verify(channel, node_id, content) do
+    with {:ok, write_resp} <- write_file(channel, node_id, content),
+         {:ok, read_resp} <- read_file(channel, node_id) do
+      if read_resp.data == content do
+        {:ok, write_resp}
+      else
+        {:error, :data_mismatch}
+      end
+    end
+  end
+end

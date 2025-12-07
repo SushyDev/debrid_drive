@@ -1,40 +1,89 @@
-FROM golang:1.24.0-alpine AS builder
+# Stage 1: Build Stage
+FROM hexpm/elixir:1.19.4-erlang-27.3.4.6-alpine-3.21.5 AS builder
 
-RUN apk update && apk add --no-cache \
-    build-base \
-    fuse \
-    bash \
+# Install build dependencies
+RUN apk add --no-cache \
     git \
- && apk add --no-cache --virtual .build-deps \
-    gcc \
-    musl-dev \
- && apk add --no-cache fuse-dev \
- && rm -rf /var/cache/apk/*
+    build-base \
+    sqlite \
+    sqlite-dev
 
-ENV GO111MODULE=on
-ENV GOPROXY=direct
-ENV GOFLAGS="-mod=readonly"
-
+# Set working directory
 WORKDIR /app
 
-COPY app/go.mod app/go.sum ./
+# Set build environment
+ENV MIX_ENV=prod
 
-RUN go mod download
+# Install hex and rebar
+RUN mix local.hex --force && \
+    mix local.rebar --force
 
-COPY app .
+# Copy mix files
+COPY mix.exs mix.lock ./
+COPY config config
+COPY apps/vfs/mix.exs ./apps/vfs/
+COPY apps/sync_engine/mix.exs ./apps/sync_engine/
+COPY apps/grpc_server/mix.exs ./apps/grpc_server/
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o main main.go
+# Install dependencies
+RUN mix deps.get --only prod
+RUN mix deps.compile
 
-FROM alpine:latest
+# Copy application code
+COPY apps apps
 
+# Compile the project
+RUN mix compile
+
+# Build release
+RUN mix release
+
+# Stage 2: Runtime Stage
+FROM alpine:3.21.5
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    openssl \
+    ncurses-libs \
+    libstdc++ \
+    sqlite \
+    bash
+
+# Create app user
+RUN addgroup -g 1000 app && \
+    adduser -D -u 1000 -G app app
+
+# Set working directory
 WORKDIR /app
 
-RUN apk add --no-cache fuse su-exec
+# Copy release from builder
+COPY --from=builder --chown=app:app /app/_build/prod/rel/debrid_stream ./
 
-COPY --from=builder /app/main /app/main
-
-COPY build/entrypoint.sh /app/entrypoint.sh
-
+# Copy entrypoint script
+COPY --chown=app:app entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 
+# Create data directory for SQLite database
+RUN mkdir -p /app/data && chown -R app:app /app/data
+
+# Set environment variables
+ENV HOME=/app
+ENV MIX_ENV=prod
+ENV RELEASE_COOKIE=change_me_in_production
+ENV DATABASE_PATH=/app/data/debrid_stream_prod.db
+
+# Switch to app user
+USER app
+
+# Expose gRPC port (default 50051, configurable via GRPC_PORT)
+EXPOSE 50051
+
+# Health check using the built-in health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD /app/bin/debrid_stream rpc "SyncEngine.HealthCheck.ping()" || exit 1
+
+# Use entrypoint script
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default command
+CMD ["/app/bin/debrid_stream", "start"]

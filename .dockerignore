@@ -1,0 +1,66 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+/_build/
+/deps/
+/cover/
+/doc/
+*.ez
+erl_crash.dump
+
+# Test artifacts
+/tmp/
+
+# Environment
+.env
+.env.*
+.envrc
+.direnv
+
+# Database files
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation
+README*.md
+docs/
+CHANGELOG.md
+LICENSE*
+CONTRIBUTING.md
+
+# CI/CD (we want these in the image)
+# .github/
+
+# Nix
+flake.nix
+flake.lock
+.envrc
+
+# Previous implementation
+previous_debrid_drive_implementation/
+fuse_video_streamer/
+
+# Data directories
+/data/
+/priv/static/
+
+# Logs
+*.log
+
+# Other
+.dockerignore
+docker-compose*.yml
+Dockerfile*
