@@ -29,6 +29,8 @@ defmodule GrpcServer.FileSystemService.Server do
     RenameResponse,
     LinkRequest,
     LinkResponse,
+    SetattrRequest,
+    SetattrResponse,
     ReadFileRequest,
     ReadFileResponse,
     WriteFileRequest,
@@ -67,7 +69,8 @@ defmodule GrpcServer.FileSystemService.Server do
       %ReadDirAllResponse{nodes: nodes}
     else
       {:error, :not_found} ->
-        raise GRPC.RPCError, status: :not_found, message: "Node not found"
+        # Return empty list for FUSE ENOENT
+        %ReadDirAllResponse{nodes: []}
 
       false ->
         raise GRPC.RPCError, status: :invalid_argument, message: "Not a directory"
@@ -86,7 +89,8 @@ defmodule GrpcServer.FileSystemService.Server do
         %LookupResponse{node: node_to_proto(node)}
 
       {:error, :not_found} ->
-        raise GRPC.RPCError, status: :not_found, message: "Node not found"
+        # Return empty response for FUSE ENOENT
+        %LookupResponse{}
     end
   end
 
@@ -101,8 +105,8 @@ defmodule GrpcServer.FileSystemService.Server do
     permissions = mode &&& 0o777
 
     case VFS.create_file(parent_id, name, mode: permissions) do
-      {:ok, _node} ->
-        %CreateResponse{}
+      {:ok, node} ->
+        %CreateResponse{node: node_to_proto(node)}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
@@ -227,6 +231,35 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   @doc """
+  Sets file attributes (mode, size, timestamps, ownership).
+
+  This is primarily used by FUSE for operations like chmod, truncate, touch, and chown.
+  Only provided fields are updated; nil fields are ignored.
+  """
+  @spec setattr(SetattrRequest.t(), GRPC.Server.Stream.t()) :: SetattrResponse.t()
+  def setattr(%SetattrRequest{node_id: node_id} = request, _stream) do
+    with {:ok, node} <- VFS.get_node(node_id),
+         {:ok, updated_node} <- apply_setattr(node, request) do
+      %SetattrResponse{node: node_to_proto(updated_node)}
+    else
+      {:error, :not_found} ->
+        raise GRPC.RPCError, status: :not_found, message: "Node not found"
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+
+        raise GRPC.RPCError,
+          status: :invalid_argument,
+          message: "Invalid attributes: #{inspect(errors)}"
+
+      {:error, reason} ->
+        raise GRPC.RPCError,
+          status: :internal,
+          message: "Setattr operation failed: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
   Reads file data.
   """
   @spec read_file(ReadFileRequest.t(), GRPC.Server.Stream.t()) :: ReadFileResponse.t()
@@ -272,10 +305,28 @@ defmodule GrpcServer.FileSystemService.Server do
   def get_file_info(%GetFileInfoRequest{node_id: node_id}, _stream) do
     case VFS.get_node(node_id) do
       {:ok, node} ->
-        %GetFileInfoResponse{size: node.size, mode: node.mode}
+        # Convert Elixir NaiveDateTime to Unix timestamp
+        {atime, atime_nsec} = datetime_to_unix(node.updated_at)
+        {mtime, mtime_nsec} = datetime_to_unix(node.updated_at)
+        {ctime, ctime_nsec} = datetime_to_unix(node.inserted_at)
+
+        %GetFileInfoResponse{
+          size: node.size || 0,
+          mode: node.mode,
+          atime: atime,
+          atime_nsec: atime_nsec,
+          mtime: mtime,
+          mtime_nsec: mtime_nsec,
+          ctime: ctime,
+          ctime_nsec: ctime_nsec,
+          uid: 0,
+          gid: 0,
+          nlink: 1
+        }
 
       {:error, :not_found} ->
-        raise GRPC.RPCError, status: :not_found, message: "Node not found"
+        # Return empty response for FUSE ENOENT
+        %GetFileInfoResponse{}
     end
   end
 
@@ -303,7 +354,8 @@ defmodule GrpcServer.FileSystemService.Server do
       %GetStreamUrlResponse{url: download_url}
     else
       {:error, :not_found} ->
-        raise GRPC.RPCError, status: :not_found, message: "Node not found"
+        # Return empty response for FUSE ENOENT
+        %GetStreamUrlResponse{}
 
       {:error, :not_streamable} ->
         raise GRPC.RPCError,
@@ -345,11 +397,26 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   defp node_to_proto(node) do
+    # Convert Elixir NaiveDateTime to Unix timestamp
+    {atime, atime_nsec} = datetime_to_unix(node.updated_at)
+    {mtime, mtime_nsec} = datetime_to_unix(node.updated_at)
+    {ctime, ctime_nsec} = datetime_to_unix(node.inserted_at)
+
     %Node{
       id: node.id,
       name: node.name,
       mode: node.mode,
-      streamable: is_streamable?(node)
+      streamable: is_streamable?(node),
+      size: node.size || 0,
+      atime: atime,
+      atime_nsec: atime_nsec,
+      mtime: mtime,
+      mtime_nsec: mtime_nsec,
+      ctime: ctime,
+      ctime_nsec: ctime_nsec,
+      uid: 0,
+      gid: 0,
+      nlink: 1
     }
   end
 
@@ -491,6 +558,64 @@ defmodule GrpcServer.FileSystemService.Server do
       {:ok, updated_file.download_link}
     else
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Converts NaiveDateTime to Unix timestamp (seconds since epoch) and nanoseconds
+  defp datetime_to_unix(nil), do: {0, 0}
+
+  defp datetime_to_unix(%NaiveDateTime{} = dt) do
+    unix_seconds = NaiveDateTime.diff(dt, ~N[1970-01-01 00:00:00])
+    # Extract microseconds and convert to nanoseconds
+    nanoseconds = dt.microsecond |> elem(0) |> Kernel.*(1000)
+    {unix_seconds, nanoseconds}
+  end
+
+  # Applies setattr changes to a node
+  # Only updates fields that are present (not nil) in the request
+  defp apply_setattr(node, request) do
+    attrs = %{}
+
+    # Handle mode change (chmod)
+    attrs =
+      if request.mode do
+        Map.put(attrs, :mode, request.mode)
+      else
+        attrs
+      end
+
+    # Handle size change (truncate)
+    # For now we only support truncating to 0 (clearing file)
+    attrs =
+      if request.size do
+        cond do
+          request.size == 0 ->
+            Map.put(attrs, :size, 0) |> Map.put(:data, <<>>)
+
+          request.size == node.size ->
+            # No-op: size unchanged
+            attrs
+
+          true ->
+            # We don't support arbitrary truncate/extend operations yet
+            # This would require implementing sparse file support
+            raise GRPC.RPCError,
+              status: :unimplemented,
+              message: "Only truncate to 0 is currently supported"
+        end
+      else
+        attrs
+      end
+
+    # Note: We ignore atime, mtime, uid, gid for now as VFS doesn't support them yet
+    # These fields are automatically managed by Ecto timestamps (inserted_at, updated_at)
+
+    if attrs == %{} do
+      # No changes requested
+      {:ok, node}
+    else
+      # Apply changes via VFS
+      VFS.Repo.update(Ecto.Changeset.change(node, attrs))
     end
   end
 end

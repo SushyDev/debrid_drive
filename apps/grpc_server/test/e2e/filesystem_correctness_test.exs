@@ -93,11 +93,11 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
       assert lookup_resp.node.name == "lookup_test"
     end
 
-    test "lookup returns error for non-existent directory", %{channel: channel} do
+    test "lookup returns nil node for non-existent directory", %{channel: channel} do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "non_existent")
     end
   end
@@ -204,7 +204,7 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
       {:ok, _} = remove(channel, root_id, "to_remove.txt")
 
       # Verify file is gone
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "to_remove.txt")
     end
 
@@ -215,7 +215,7 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
       {:ok, _} = mkdir(channel, root_id, "to_remove_dir")
       {:ok, _} = remove(channel, root_id, "to_remove_dir")
 
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "to_remove_dir")
     end
 
@@ -237,7 +237,7 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
       {:ok, _} = rename(channel, root_id, "old_name.txt", root_id, "new_name.txt")
 
       # Old name should not exist
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "old_name.txt")
 
       # New name should exist
@@ -256,7 +256,7 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
       {:ok, _} = rename(channel, root_id, "moveme.txt", target_id, "moveme.txt")
 
       # Should not be in root anymore
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "moveme.txt")
 
       # Should be in target directory

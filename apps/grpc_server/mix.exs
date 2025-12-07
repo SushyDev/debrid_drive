@@ -33,6 +33,8 @@ defmodule GrpcServer.MixProject do
     [
       {:grpc, "~> 0.9"},
       {:protobuf, "~> 0.13"},
+      {:stream_mount_api,
+       git: "https://github.com/sushydev/stream_mount_api", tag: "v1.3.2", subdir: "gen/elixir"},
       {:vfs, in_umbrella: true},
       {:stream_data, "~> 1.0", only: :test}
     ]

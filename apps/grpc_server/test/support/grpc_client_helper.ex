@@ -16,6 +16,7 @@ defmodule GrpcServer.Test.GrpcClientHelper do
     RemoveRequest,
     RenameRequest,
     LinkRequest,
+    SetattrRequest,
     ReadFileRequest,
     WriteFileRequest,
     GetFileInfoRequest,
@@ -154,6 +155,25 @@ defmodule GrpcServer.Test.GrpcClientHelper do
   def get_stream_url(channel, node_id) do
     request = %GetStreamUrlRequest{node_id: node_id}
     FileSystemStub.get_stream_url(channel, request)
+  end
+
+  @doc """
+  Sets file attributes (mode, size, timestamps, ownership).
+  """
+  def setattr(channel, node_id, opts \\ []) do
+    request = %SetattrRequest{
+      node_id: node_id,
+      mode: opts[:mode],
+      size: opts[:size],
+      atime: opts[:atime],
+      atime_nsec: opts[:atime_nsec],
+      mtime: opts[:mtime],
+      mtime_nsec: opts[:mtime_nsec],
+      uid: opts[:uid],
+      gid: opts[:gid]
+    }
+
+    FileSystemStub.setattr(channel, request)
   end
 
   @doc """

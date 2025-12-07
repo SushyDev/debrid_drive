@@ -367,7 +367,7 @@ defmodule GrpcServer.E2E.EdgeCaseTest do
       {:ok, _} = mkdir(channel, root_id, "to_remove_empty")
       {:ok, _} = remove(channel, root_id, "to_remove_empty")
 
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.LookupResponse{node: nil}} =
                lookup(channel, root_id, "to_remove_empty")
     end
   end

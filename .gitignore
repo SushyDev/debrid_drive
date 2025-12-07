@@ -26,3 +26,6 @@ erl_crash.dump
 
 # Ignore Elixir's configuration files
 .env
+
+# Random markdown files
+/specs

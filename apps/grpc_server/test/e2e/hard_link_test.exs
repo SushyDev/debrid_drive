@@ -370,10 +370,10 @@ defmodule GrpcServer.E2E.HardLinkTest do
   end
 
   describe "GetStreamUrl - Error cases" do
-    test "returns not_found for non-existent node", %{channel: channel} do
+    test "returns nil url for non-existent node", %{channel: channel} do
       non_existent_id = 999_999
 
-      assert {:error, %GRPC.RPCError{status: 5}} =
+      assert {:ok, %StreamMountApi.GetStreamUrlResponse{url: nil}} =
                get_stream_url(channel, non_existent_id)
     end
 
@@ -423,8 +423,8 @@ defmodule GrpcServer.E2E.HardLinkTest do
   end
 
   describe "Basic gRPC operations" do
-    test "ReadDirAll returns not_found for non-existent directory", %{channel: channel} do
-      assert {:error, %GRPC.RPCError{status: 5, message: "Node not found"}} =
+    test "ReadDirAll returns empty list for non-existent directory", %{channel: channel} do
+      assert {:ok, %StreamMountApi.ReadDirAllResponse{nodes: []}} =
                read_dir_all(channel, 999_999)
     end
 
