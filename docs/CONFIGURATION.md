@@ -23,6 +23,11 @@ RD_WEBDAV_PASSWORD=your_webdav_password_here
 ### Optional Variables
 
 ```bash
+# Logging Configuration (optional)
+# Valid values: debug, info, warning, error
+# Default: info (debug in dev environment)
+LOG_LEVEL=info
+
 # Database Configuration (optional)
 # Defaults to: debrid_stream_#{env}.db
 DATABASE_PATH=/path/to/database.db
@@ -35,6 +40,70 @@ GRPC_PORT=50051
 SYNC_POLL_INTERVAL=300000  # milliseconds (default: 5 minutes)
 MAX_REQUESTS_PER_MINUTE=50  # API rate limit (default: 50)
 ```
+
+## Logging
+
+The application uses Elixir's built-in Logger with a unified configuration across all umbrella apps.
+
+### Log Levels
+
+Set the log level via the `LOG_LEVEL` environment variable:
+
+- `debug` - Verbose logging for development and troubleshooting
+- `info` - Standard operational logging (default)
+- `warning` - Important warnings that need attention
+- `error` - Error conditions only
+
+### Log Format
+
+Logs use the following format:
+```
+TIME METADATA[LEVEL] MESSAGE
+```
+
+Example:
+```
+23:45:12.456 pid=<0.234.0> application=sync_engine module=SyncEngine.Poller[info] Starting torrent sync
+```
+
+### Setting Log Level
+
+```bash
+# Development - use debug for verbose output
+export LOG_LEVEL=debug
+
+# Production - use info or warning
+export LOG_LEVEL=info
+
+# Troubleshooting - enable debug temporarily
+LOG_LEVEL=debug iex -S mix
+```
+
+### Runtime Log Level Changes
+
+In production releases, the log level is read from the environment at startup. To change it:
+
+```bash
+# Update environment variable
+export LOG_LEVEL=debug
+
+# Restart the application
+```
+
+Note: The log level cannot be changed at runtime without restarting the application.
+
+### Per-Module Logging
+
+The logger automatically includes the application and module name in metadata. This helps filter logs:
+
+```bash
+# Filter logs by application
+LOG_LEVEL=debug iex -S mix | grep application=sync_engine
+
+# Filter logs by module
+LOG_LEVEL=debug iex -S mix | grep module=SyncEngine.Poller
+```
+
 
 ## Loading Environment Variables
 

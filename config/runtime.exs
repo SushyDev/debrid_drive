@@ -1,5 +1,18 @@
 import Config
 
+# Configure Logger level from environment variable
+# Valid values: debug, info, warning, error
+log_level =
+  case System.get_env("LOG_LEVEL") do
+    level when level in ["debug", "info", "warning", "error"] ->
+      String.to_existing_atom(level)
+
+    _ ->
+      :info
+  end
+
+config :logger, level: log_level
+
 # Runtime configuration for production releases
 if config_env() == :prod do
   # Configure database path from environment variable

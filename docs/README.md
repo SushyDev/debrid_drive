@@ -18,6 +18,7 @@ Debrid Drive creates a unified virtual filesystem from your RealDebrid torrents,
 
 ### Production Ready
 - ✅ Environment-based configuration
+- ✅ Unified logging with configurable levels
 - ✅ Health check monitoring
 - ✅ Rate limiting (50 req/min)
 - ✅ Error recovery & retry logic
@@ -63,6 +64,10 @@ Create a `.env` file in the project root:
 # Get your token from: https://real-debrid.com/apitoken
 RD_API_TOKEN=your_api_token_here
 RD_WEBDAV_PASSWORD=your_webdav_password_here
+
+# Logging (OPTIONAL) - defaults to 'info'
+# Valid values: debug, info, warning, error
+LOG_LEVEL=info
 ```
 
 **Load environment variables:**
@@ -178,6 +183,12 @@ DbInfo.rejected()
 # Display VFS tree
 DbInfo.tree()
 DbInfo.tree(max_depth: 3)
+
+# Show logging configuration
+DbInfo.log_info()
+
+# Demo logging at all levels
+DbInfo.demo_logging()
 ```
 
 ### Health Monitoring
@@ -203,6 +214,30 @@ SyncEngine.Services.TorrentSync.sync(client, torrents_root_id: root.id)
 # View job queue status
 SyncEngine.JobQueue.status()
 ```
+
+### Logging
+
+Debrid Drive uses Elixir's built-in Logger with a unified configuration. Control verbosity with the `LOG_LEVEL` environment variable:
+
+```bash
+# Set log level (debug, info, warning, error)
+export LOG_LEVEL=debug
+
+# Start with specific log level
+LOG_LEVEL=debug iex -S mix
+
+# Or in IEx, check current level
+DbInfo.log_info()
+DbInfo.demo_logging()
+```
+
+**Log Levels:**
+- `debug` - Verbose output for development and troubleshooting
+- `info` - Standard operational logging (default)
+- `warning` - Important warnings that need attention
+- `error` - Error conditions only
+
+See [Configuration Guide](CONFIGURATION.md#logging) for more details.
 
 ---
 
