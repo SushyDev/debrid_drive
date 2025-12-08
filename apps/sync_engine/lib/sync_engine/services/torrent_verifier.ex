@@ -142,32 +142,33 @@ defmodule SyncEngine.Services.TorrentVerifier do
   end
 
   defp remove_empty_torrent(%Torrent{} = torrent) do
-    result = Repo.transaction(fn ->
-      # Delete the torrent (will cascade to files)
-      case Torrents.delete_torrent(torrent) do
-        {:ok, _} ->
-          # Also try to remove the VFS directory
-          case VFS.remove_by_id(torrent.node_id) do
-            {:ok, _} ->
-              :ok
+    result =
+      Repo.transaction(fn ->
+        # Delete the torrent (will cascade to files)
+        case Torrents.delete_torrent(torrent) do
+          {:ok, _} ->
+            # Also try to remove the VFS directory
+            case VFS.remove_by_id(torrent.node_id) do
+              {:ok, _} ->
+                :ok
 
-            {:error, :not_found} ->
-              # Directory already gone, that's fine
-              :ok
+              {:error, :not_found} ->
+                # Directory already gone, that's fine
+                :ok
 
-            {:error, reason} ->
-              Logger.warning(
-                "Failed to remove VFS directory for torrent #{torrent.rd_id}: #{inspect(reason)}"
-              )
+              {:error, reason} ->
+                Logger.warning(
+                  "Failed to remove VFS directory for torrent #{torrent.rd_id}: #{inspect(reason)}"
+                )
 
-              # Still return ok since database was cleaned up
-              :ok
-          end
+                # Still return ok since database was cleaned up
+                :ok
+            end
 
-        {:error, reason} ->
-          Repo.rollback(reason)
-      end
-    end)
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
 
     case result do
       {:ok, result} -> result

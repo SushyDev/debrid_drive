@@ -292,6 +292,78 @@ defmodule DbInfo do
     :ok
   end
 
+  @doc """
+  Shows current logging configuration.
+
+  ## Example
+
+      iex> DbInfo.log_info()
+  """
+  def log_info do
+    level = Logger.level()
+
+    IO.puts(
+      "\n#{IO.ANSI.cyan()}╔════════════════════════════════════════════════════════════╗#{IO.ANSI.reset()}"
+    )
+
+    IO.puts(
+      "#{IO.ANSI.cyan()}║#{IO.ANSI.reset()}  #{IO.ANSI.bright()}Logger Configuration#{IO.ANSI.reset()}                                 #{IO.ANSI.cyan()}║#{IO.ANSI.reset()}"
+    )
+
+    IO.puts(
+      "#{IO.ANSI.cyan()}╚════════════════════════════════════════════════════════════╝#{IO.ANSI.reset()}\n"
+    )
+
+    IO.puts("  Current Log Level: #{IO.ANSI.green()}#{level}#{IO.ANSI.reset()}")
+    IO.puts("\n  Available Levels:")
+    IO.puts("    • debug   - Verbose logging for development")
+    IO.puts("    • info    - Standard operational logging")
+    IO.puts("    • warning - Important warnings")
+    IO.puts("    • error   - Error conditions only")
+
+    IO.puts("\n  To change log level, set LOG_LEVEL environment variable:")
+    IO.puts("    #{IO.ANSI.yellow()}export LOG_LEVEL=debug#{IO.ANSI.reset()}")
+    IO.puts("    Then restart the application\n")
+
+    :ok
+  end
+
+  @doc """
+  Demonstrates logging at different levels.
+
+  ## Example
+
+      iex> DbInfo.demo_logging()
+  """
+  def demo_logging do
+    require Logger
+
+    IO.puts(
+      "\n#{IO.ANSI.cyan()}═══════════════════════════════════════════════════════#{IO.ANSI.reset()}"
+    )
+
+    IO.puts(
+      "#{IO.ANSI.cyan()}  Logging Demo (current level: #{Logger.level()})#{IO.ANSI.reset()}"
+    )
+
+    IO.puts(
+      "#{IO.ANSI.cyan()}═══════════════════════════════════════════════════════#{IO.ANSI.reset()}\n"
+    )
+
+    Logger.debug("This is a DEBUG message - verbose development info")
+    Logger.info("This is an INFO message - normal operational logging")
+    Logger.warning("This is a WARNING message - something needs attention")
+    Logger.error("This is an ERROR message - something went wrong")
+
+    IO.puts(
+      "\n#{IO.ANSI.yellow()}Note: You'll only see messages at or above your current log level.#{IO.ANSI.reset()}"
+    )
+
+    IO.puts("#{IO.ANSI.yellow()}Current level: #{Logger.level()}#{IO.ANSI.reset()}\n")
+
+    :ok
+  end
+
   # Private helpers
 
   defp print_tree(_node, depth, max_depth) when depth >= max_depth do
@@ -358,13 +430,31 @@ defmodule DbInfo do
 end
 
 # Print welcome message
-IO.puts("\n#{IO.ANSI.cyan()}╔════════════════════════════════════════════════════════════╗#{IO.ANSI.reset()}")
-IO.puts("#{IO.ANSI.cyan()}║#{IO.ANSI.reset()}  #{IO.ANSI.bright()}Debrid Drive IEx Helper#{IO.ANSI.reset()}                              #{IO.ANSI.cyan()}║#{IO.ANSI.reset()}")
-IO.puts("#{IO.ANSI.cyan()}╚════════════════════════════════════════════════════════════╝#{IO.ANSI.reset()}\n")
+IO.puts(
+  "\n#{IO.ANSI.cyan()}╔════════════════════════════════════════════════════════════╗#{IO.ANSI.reset()}"
+)
+
+IO.puts(
+  "#{IO.ANSI.cyan()}║#{IO.ANSI.reset()}  #{IO.ANSI.bright()}Debrid Drive IEx Helper#{IO.ANSI.reset()}                              #{IO.ANSI.cyan()}║#{IO.ANSI.reset()}"
+)
+
+IO.puts(
+  "#{IO.ANSI.cyan()}╚════════════════════════════════════════════════════════════╝#{IO.ANSI.reset()}\n"
+)
+
 IO.puts("#{IO.ANSI.yellow()}Available commands:#{IO.ANSI.reset()}")
 IO.puts("  #{IO.ANSI.green()}DbInfo.overview()#{IO.ANSI.reset()}   - Complete database overview")
 IO.puts("  #{IO.ANSI.green()}DbInfo.stats()#{IO.ANSI.reset()}      - Quick stats summary")
 IO.puts("  #{IO.ANSI.green()}DbInfo.torrents()#{IO.ANSI.reset()}   - Show torrent details")
 IO.puts("  #{IO.ANSI.green()}DbInfo.queue()#{IO.ANSI.reset()}      - Job queue status")
 IO.puts("  #{IO.ANSI.green()}DbInfo.rejected()#{IO.ANSI.reset()}   - Show rejected torrents")
-IO.puts("  #{IO.ANSI.green()}DbInfo.tree()#{IO.ANSI.reset()}       - VFS tree structure\n")
+IO.puts("  #{IO.ANSI.green()}DbInfo.tree()#{IO.ANSI.reset()}       - VFS tree structure")
+IO.puts("  #{IO.ANSI.green()}DbInfo.log_info()#{IO.ANSI.reset()}   - Show logging configuration")
+
+IO.puts(
+  "  #{IO.ANSI.green()}DbInfo.demo_logging()#{IO.ANSI.reset()} - Demo logging at all levels\n"
+)
+
+IO.puts(
+  "#{IO.ANSI.cyan()}Current log level: #{IO.ANSI.bright()}#{Logger.level()}#{IO.ANSI.reset()}\n"
+)

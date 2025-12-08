@@ -9,6 +9,17 @@
 # move said applications out of the umbrella.
 import Config
 
+# Configure Logger
+# The log level can be set via LOG_LEVEL environment variable
+# Valid values: debug, info, warning, error
+# Default: info
+config :logger, :console,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:pid, :application, :module]
+
+config :logger,
+  level: :info
+
 # Configure VFS database
 config :vfs, VFS.Repo,
   database: Path.expand("../debrid_stream_#{config_env()}.db", __DIR__),
