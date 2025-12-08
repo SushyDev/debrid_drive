@@ -25,7 +25,7 @@ RD_WEBDAV_PASSWORD=your_webdav_password_here
 ```bash
 # Logging Configuration (optional)
 # Valid values: debug, info, warning, error
-# Default: info (debug in dev environment)
+# Default: info (in dev environment, always debug; LOG_LEVEL is ignored in dev)
 LOG_LEVEL=info
 
 # Database Configuration (optional)
