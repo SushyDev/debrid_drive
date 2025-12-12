@@ -58,12 +58,18 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Creates a torrent.
+  Creates a torrent, or updates it if a torrent with the same hash already exists.
+
+  Uses upsert (on_conflict) to handle duplicate hashes gracefully during sync.
+  Updates all fields except id, inserted_at, and hash when a conflict occurs.
   """
   def create_torrent(attrs) do
     %Torrent{}
     |> Torrent.changeset(attrs)
-    |> Repo.insert()
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, [:id, :inserted_at, :hash]},
+      conflict_target: :hash
+    )
   end
 
   @doc """
@@ -102,12 +108,18 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Creates a torrent file.
+  Creates a torrent file, or updates it if a file with the same (torrent_id, rd_id) already exists.
+
+  Uses upsert (on_conflict) to handle duplicate files gracefully during sync.
+  Updates all fields except id and inserted_at when a conflict occurs.
   """
   def create_torrent_file(attrs) do
     %TorrentFile{}
     |> TorrentFile.changeset(attrs)
-    |> Repo.insert()
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, [:id, :inserted_at]},
+      conflict_target: [:torrent_id, :rd_id]
+    )
   end
 
   @doc """

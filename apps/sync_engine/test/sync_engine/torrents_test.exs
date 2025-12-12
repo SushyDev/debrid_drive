@@ -63,6 +63,59 @@ defmodule SyncEngine.TorrentsTest do
       assert "has already been taken" in errors_on(changeset).rd_id
     end
 
+    test "create_torrent/1 upserts on duplicate hash", %{test_dir: test_dir} do
+      {:ok, node1} = VFS.create_directory(test_dir.id, "torrent1")
+      {:ok, node2} = VFS.create_directory(test_dir.id, "torrent2")
+
+      # First insert
+      attrs1 = %{
+        rd_id: "ORIGINAL123",
+        filename: "Original Filename",
+        hash: "duplicate_hash_123",
+        bytes: 1_000_000,
+        status: "downloading",
+        progress: 50,
+        node_id: node1.id
+      }
+
+      assert {:ok, original} = Torrents.create_torrent(attrs1)
+      assert original.filename == "Original Filename"
+      assert original.bytes == 1_000_000
+      assert original.status == "downloading"
+      assert original.progress == 50
+
+      # Second insert with same hash should upsert
+      attrs2 = %{
+        rd_id: "UPDATED123",
+        filename: "Updated Filename",
+        hash: "duplicate_hash_123",
+        bytes: 2_000_000,
+        status: "downloaded",
+        progress: 100,
+        node_id: node2.id
+      }
+
+      assert {:ok, updated} = Torrents.create_torrent(attrs2)
+
+      # Should have the same ID (updated, not inserted)
+      assert updated.id == original.id
+
+      # Should have updated fields
+      assert updated.filename == "Updated Filename"
+      assert updated.bytes == 2_000_000
+      assert updated.status == "downloaded"
+      assert updated.progress == 100
+      assert updated.node_id == node2.id
+
+      # Hash should remain the same
+      assert updated.hash == "duplicate_hash_123"
+
+      # Should only have one record in the database
+      torrents_by_hash = Torrents.get_torrents_by_hash()
+      assert map_size(torrents_by_hash) == 1
+      assert Map.has_key?(torrents_by_hash, "duplicate_hash_123")
+    end
+
     test "get_torrent_by_rd_id/1 returns torrent", %{test_dir: test_dir} do
       {:ok, node} = VFS.create_directory(test_dir.id, "test")
 
@@ -156,6 +209,56 @@ defmodule SyncEngine.TorrentsTest do
       assert file.rd_id == 1
       assert file.path == "/test_file.mp4"
       assert file.torrent_id == torrent.id
+    end
+
+    test "create_torrent_file/1 upserts on duplicate (torrent_id, rd_id)", %{
+      torrent: torrent,
+      file_node: file_node
+    } do
+      {:ok, new_node} = VFS.create_file(file_node.parent_id, "updated_file.mp4", size: 1000)
+
+      # First insert
+      attrs1 = %{
+        rd_id: 123,
+        path: "/original_path.mp4",
+        bytes: 500,
+        selected: 1,
+        link: "https://original-link.com",
+        torrent_id: torrent.id,
+        node_id: file_node.id
+      }
+
+      assert {:ok, original} = Torrents.create_torrent_file(attrs1)
+      assert original.path == "/original_path.mp4"
+      assert original.bytes == 500
+      assert original.link == "https://original-link.com"
+      assert original.node_id == file_node.id
+
+      # Second insert with same (torrent_id, rd_id) should upsert
+      attrs2 = %{
+        rd_id: 123,
+        path: "/updated_path.mp4",
+        bytes: 1000,
+        selected: 1,
+        link: "https://updated-link.com",
+        torrent_id: torrent.id,
+        node_id: new_node.id
+      }
+
+      assert {:ok, updated} = Torrents.create_torrent_file(attrs2)
+
+      # Should have the same ID (updated, not inserted)
+      assert updated.id == original.id
+
+      # Should have updated fields
+      assert updated.path == "/updated_path.mp4"
+      assert updated.bytes == 1000
+      assert updated.link == "https://updated-link.com"
+      assert updated.node_id == new_node.id
+
+      # Should only have one record
+      files = Torrents.list_torrent_files(torrent.id)
+      assert length(files) == 1
     end
 
     test "list_torrent_files/1 returns files for torrent", %{

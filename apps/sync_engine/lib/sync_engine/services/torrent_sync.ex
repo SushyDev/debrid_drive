@@ -137,7 +137,7 @@ defmodule SyncEngine.Services.TorrentSync do
   end
 
   defp add_torrent(client, rd_torrent, torrents_root_id) do
-    Logger.info("Adding torrent: #{rd_torrent.filename} (#{rd_torrent.id})")
+    Logger.info("Syncing torrent: #{rd_torrent.filename} (#{rd_torrent.id})")
 
     # Fetch detailed torrent info BEFORE starting transaction
     # This prevents database timeouts from slow API calls
@@ -147,12 +147,20 @@ defmodule SyncEngine.Services.TorrentSync do
       # Now run the database transaction with pre-fetched data
       result =
         Repo.transaction(fn ->
-          # 1. Create VFS directory node for the torrent
+          # 1. Create or lookup VFS directory node for the torrent
           dir_name = format_torrent_directory_name(rd_torrent)
 
-          with {:ok, torrent_node} <-
-                 VFS.create_directory(torrents_root_id, dir_name),
-               # 2. Create torrent record
+          torrent_node =
+            case VFS.lookup(torrents_root_id, dir_name) do
+              {:ok, existing_node} ->
+                {:ok, existing_node}
+
+              {:error, :not_found} ->
+                VFS.create_directory(torrents_root_id, dir_name)
+            end
+
+          with {:ok, torrent_node} <- torrent_node,
+               # 2. Create/upsert torrent record
                {:ok, torrent} <-
                  SyncEngine.Torrents.create_torrent(%{
                    rd_id: rd_torrent.id,
@@ -169,7 +177,7 @@ defmodule SyncEngine.Services.TorrentSync do
                    seeders: rd_torrent.seeders,
                    node_id: torrent_node.id
                  }),
-               # 3. Add files (using pre-fetched torrent_info)
+               # 3. Add/upsert files (using pre-fetched torrent_info)
                {:ok, _files} <-
                  add_torrent_files(torrent, torrent_node, torrent_info.files, torrent_info.links) do
             torrent
@@ -253,27 +261,45 @@ defmodule SyncEngine.Services.TorrentSync do
     dir_parts = Enum.slice(path_parts, 0..-2//1)
 
     # Create directory structure if needed
-    with {:ok, parent_node} <- ensure_directory_structure(torrent_node.id, dir_parts),
-         # Create file node with streamable content type
-         {:ok, file_node} <-
-           VFS.create_file(parent_node, sanitize_filename(filename),
-             size: rd_file.bytes,
-             content_type: "sync_engine/streamable"
-           ),
-         # Create torrent file record with link
-         {:ok, _torrent_file} <-
-           SyncEngine.Torrents.create_torrent_file(%{
-             rd_id: rd_file.id,
-             path: rd_file.path,
-             bytes: rd_file.bytes,
-             selected: rd_file.selected,
-             link: link,
-             torrent_id: torrent.id,
-             node_id: file_node.id
-           }) do
-      {:ok, file_node}
-    else
-      error -> error
+    with {:ok, parent_node} <- ensure_directory_structure(torrent_node.id, dir_parts) do
+      sanitized = sanitize_filename(filename)
+
+      # Check if file already exists (for upsert scenario)
+      file_node =
+        case VFS.lookup(parent_node, sanitized) do
+          {:ok, existing_node} ->
+            # File node already exists, reuse it to preserve hardlinks
+            # Update its size if changed
+            if existing_node.size != rd_file.bytes do
+              VFS.update_node(existing_node.id, %{size: rd_file.bytes})
+            end
+
+            {:ok, existing_node}
+
+          {:error, :not_found} ->
+            # Create new file node with streamable content type
+            VFS.create_file(parent_node, sanitized,
+              size: rd_file.bytes,
+              content_type: "sync_engine/streamable"
+            )
+        end
+
+      with {:ok, file_node} <- file_node,
+           # Create/upsert torrent file record with link
+           {:ok, _torrent_file} <-
+             SyncEngine.Torrents.create_torrent_file(%{
+               rd_id: rd_file.id,
+               path: rd_file.path,
+               bytes: rd_file.bytes,
+               selected: rd_file.selected,
+               link: link,
+               torrent_id: torrent.id,
+               node_id: file_node.id
+             }) do
+        {:ok, file_node}
+      else
+        error -> error
+      end
     end
   end
 
