@@ -39,9 +39,17 @@ defmodule SyncEngine.Services.TorrentSync do
     verify = Keyword.get(opts, :verify, true)
 
     with {:ok, rd_torrents} <- fetch_rd_torrents(client),
-         {:ok, {db_torrents, rejected_torrents}} <- fetch_db_torrents() do
+         {:ok, {db_torrents, db_hashes, rejected_torrents}} <- fetch_db_torrents() do
       # Compare and sync
-      result = perform_sync(client, rd_torrents, db_torrents, rejected_torrents, torrents_root_id)
+      result =
+        perform_sync(
+          client,
+          rd_torrents,
+          db_torrents,
+          db_hashes,
+          rejected_torrents,
+          torrents_root_id
+        )
 
       # Run verification if requested
       result =
@@ -83,11 +91,19 @@ defmodule SyncEngine.Services.TorrentSync do
 
   defp fetch_db_torrents do
     torrents = SyncEngine.Torrents.get_torrents_by_rd_id()
+    hashes = SyncEngine.Torrents.get_torrents_by_hash()
     rejected = SyncEngine.Torrents.get_rejected_torrents_by_rd_id()
-    {:ok, {torrents, rejected}}
+    {:ok, {torrents, hashes, rejected}}
   end
 
-  defp perform_sync(client, rd_torrents, db_torrents, rejected_torrents, torrents_root_id) do
+  defp perform_sync(
+         client,
+         rd_torrents,
+         db_torrents,
+         db_hashes,
+         rejected_torrents,
+         torrents_root_id
+       ) do
     # Create maps for efficient lookup
     rd_map = Map.new(rd_torrents, fn torrent -> {torrent.id, torrent} end)
 
@@ -95,6 +111,7 @@ defmodule SyncEngine.Services.TorrentSync do
     to_add =
       Map.keys(rd_map)
       |> Enum.reject(fn rd_id -> Map.has_key?(db_torrents, rd_id) end)
+      |> Enum.reject(fn rd_id -> Map.has_key?(db_hashes, Map.get(rd_map, rd_id).hash) end)
       |> Enum.reject(fn rd_id -> Map.has_key?(rejected_torrents, rd_id) end)
 
     # Find torrents to remove (in DB but not in RD)
@@ -254,14 +271,8 @@ defmodule SyncEngine.Services.TorrentSync do
 
     # Create directory structure if needed
     with {:ok, parent_node} <- ensure_directory_structure(torrent_node.id, dir_parts),
-         # Create file node with streamable content type
-         {:ok, file_node} <-
-           VFS.create_file(parent_node, sanitize_filename(filename),
-             size: rd_file.bytes,
-             content_type: "sync_engine/streamable"
-           ),
-         # Create torrent file record with link
-         {:ok, _torrent_file} <-
+         # Create virtual inode first (without VFS node)
+         {:ok, virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
              rd_id: rd_file.id,
              path: rd_file.path,
@@ -269,9 +280,18 @@ defmodule SyncEngine.Services.TorrentSync do
              selected: rd_file.selected,
              link: link,
              torrent_id: torrent.id,
-             node_id: file_node.id
-           }) do
-      {:ok, file_node}
+             node_id: nil,
+             hardlink_count: 1
+           }),
+         # Create hardlink to virtual inode (instead of source file)
+         {:ok, _hardlink_node} <-
+           VFS.create_hardlink_to_virtual_inode(
+             parent_node,
+             sanitize_filename(filename),
+             virtual_inode.id,
+             size: rd_file.bytes
+           ) do
+      {:ok, virtual_inode}
     else
       error -> error
     end
@@ -301,17 +321,21 @@ defmodule SyncEngine.Services.TorrentSync do
 
     # Delete the torrent (cascade will handle files and VFS nodes)
     with {:ok, _} <- SyncEngine.Torrents.delete_torrent(db_torrent) do
-      # Also delete the VFS node for the torrent directory with cascade
-      try do
-        VFS.remove_by_id(db_torrent.node_id, cascade: true)
-        {:ok, db_torrent}
-      rescue
-        error ->
-          Logger.error(
-            "Failed to remove VFS node for torrent #{db_torrent.rd_id}: #{inspect(error)}"
-          )
+      # Also delete the VFS node for the torrent directory with cascade, if it exists
+      if db_torrent.node_id do
+        try do
+          VFS.remove_by_id(db_torrent.node_id, cascade: true)
+          {:ok, db_torrent}
+        rescue
+          error ->
+            Logger.error(
+              "Failed to remove VFS node for torrent #{db_torrent.rd_id}: #{inspect(error)}"
+            )
 
-          {:error, error}
+            {:error, error}
+        end
+      else
+        {:ok, db_torrent}
       end
     else
       error ->

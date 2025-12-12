@@ -113,9 +113,9 @@ defmodule GrpcServer.E2E.PropertyBasedTest do
         {:ok, _} = create_file(channel, root_id, filename)
         {:ok, _} = remove(channel, root_id, filename)
 
-        # Property: lookup should fail
-        assert {:error, %GRPC.RPCError{status: 5}} =
-                 lookup(channel, root_id, filename)
+        # Property: lookup should return empty response (FUSE ENOENT behavior)
+        {:ok, lookup_resp} = lookup(channel, root_id, filename)
+        assert lookup_resp.node == nil
       end
     end
   end
@@ -225,9 +225,9 @@ defmodule GrpcServer.E2E.PropertyBasedTest do
         {:ok, _} = create_file(channel, dir_id, old_name)
         {:ok, _} = rename(channel, dir_id, old_name, dir_id, new_name)
 
-        # Property: old name should not exist
-        assert {:error, %GRPC.RPCError{status: 5}} =
-                 lookup(channel, dir_id, old_name)
+        # Property: old name should not exist (FUSE ENOENT behavior)
+        {:ok, old_lookup_resp} = lookup(channel, dir_id, old_name)
+        assert old_lookup_resp.node == nil
 
         # Property: new name should exist
         {:ok, lookup_resp} = lookup(channel, dir_id, new_name)

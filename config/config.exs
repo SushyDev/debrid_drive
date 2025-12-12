@@ -27,14 +27,12 @@ config :vfs, VFS.Repo,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   log: false,
-  # SQLite concurrency optimizations
   journal_mode: :wal,
   busy_timeout: 30000,
   cache_size: -64000,
   temp_store: :memory,
   synchronous: :normal,
   mmap_size: 30_000_000_000,
-  # Additional SQLite pragmas for better concurrency
   pragma_foreign_keys: false,
   pragma_journal_size_limit: 64_000_000
 

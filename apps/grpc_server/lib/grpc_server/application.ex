@@ -7,6 +7,10 @@ defmodule GrpcServer.Application do
 
   @impl true
   def start(_type, _args) do
+    # Ensure dependent applications are started
+    {:ok, _} = Application.ensure_all_started(:vfs)
+    {:ok, _} = Application.ensure_all_started(:sync_engine)
+
     children = [
       # gRPC server is started by the debrid_drive application
     ]

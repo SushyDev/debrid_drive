@@ -9,6 +9,8 @@ defmodule VFS.Node do
     field(:content_type, :string)
     field(:size, :integer, default: 0)
     field(:data, :binary)
+    field(:is_hardlink, :boolean, default: false)
+    field(:hardlink_target_id, :integer)
 
     belongs_to(:parent, __MODULE__, foreign_key: :parent_id)
     has_many(:children, __MODULE__, foreign_key: :parent_id)
@@ -19,7 +21,16 @@ defmodule VFS.Node do
   @doc false
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:parent_id, :name, :mode, :content_type, :size, :data])
+    |> cast(attrs, [
+      :parent_id,
+      :name,
+      :mode,
+      :content_type,
+      :size,
+      :data,
+      :is_hardlink,
+      :hardlink_target_id
+    ])
     |> validate_required([:name, :mode])
     |> validate_name()
     |> validate_size()

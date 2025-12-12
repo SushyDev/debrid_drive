@@ -11,6 +11,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   alias VFS
   alias VFS.FileMode
+  alias SyncEngine.Schemas.TorrentFile
 
   alias StreamMountApi.{
     RootRequest,
@@ -136,15 +137,15 @@ defmodule GrpcServer.FileSystemService.Server do
   @doc """
   Removes a node.
 
-  Directories are removed recursively (cascade: true).
+  For regular files/directories: removes recursively (cascade: true).
+  For hardlinks: decrements hardlink_count and enqueues torrent deletion if needed.
   Torrent-backed files are marked for deletion and cleaned up by SyncEngine.
   """
   @spec remove(RemoveRequest.t(), GRPC.Server.Stream.t()) :: RemoveResponse.t()
   def remove(%RemoveRequest{parent_node_id: parent_id, name: name}, _stream) do
     validate_name!(name)
 
-    # Use cascade: true for directory removal
-    case VFS.remove(parent_id, name, cascade: true) do
+    case handle_remove(parent_id, name) do
       :ok ->
         %RemoveResponse{}
 
@@ -160,6 +161,82 @@ defmodule GrpcServer.FileSystemService.Server do
       {:error, reason} ->
         Logger.error("Remove operation failed: #{inspect(reason)}")
         raise GRPC.RPCError, status: :internal, message: "Remove operation failed"
+    end
+  end
+
+  # Handle remove with special logic for hardlinks
+  # If it's a hardlink, decrement reference count. Otherwise, cascade delete.
+  defp handle_remove(parent_id, name) do
+    with {:ok, node} <- VFS.lookup(parent_id, name) do
+      if VFS.is_hardlink?(node) do
+        # Hardlink: handle reference counting
+        handle_hardlink_remove(node)
+      else
+        # Regular node: cascade delete
+        VFS.remove(parent_id, name, cascade: true)
+      end
+    end
+  end
+
+  # Handle hardlink removal with virtual inode reference counting
+  defp handle_hardlink_remove(hardlink_node) do
+    case VFS.extract_virtual_inode_id(hardlink_node) do
+      {:ok, inode_id} ->
+        handle_virtual_inode_remove(hardlink_node, inode_id)
+
+      {:error, _} ->
+        # Not a valid hardlink, just remove it
+        VFS.remove_by_id(hardlink_node.id, cascade: false)
+    end
+  end
+
+  # Handle virtual inode hardlink removal with reference counting
+  defp handle_virtual_inode_remove(hardlink_node, virtual_inode_id) do
+    case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+      {:ok, virtual_inode} ->
+        # Decrement hardlink count
+        case SyncEngine.Torrents.decrement_hardlink_count(virtual_inode) do
+          {:ok, {_new_count, should_delete_torrent}} ->
+            # Remove the hardlink node
+            case VFS.remove_by_id(hardlink_node.id, cascade: false) do
+              :ok ->
+                # If all hardlinks removed, enqueue torrent deletion
+                if should_delete_torrent do
+                  enqueue_torrent_deletion_on_remove(virtual_inode)
+                end
+
+                :ok
+
+              error ->
+                error
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, :not_found} ->
+        # Virtual inode already deleted, just remove the orphaned link
+        VFS.remove_by_id(hardlink_node.id, cascade: false)
+    end
+  end
+
+  # Enqueue torrent deletion when last hardlink is removed
+  defp enqueue_torrent_deletion_on_remove(virtual_inode) do
+    case SyncEngine.Torrents.get_torrent(virtual_inode.torrent_id) do
+      {:ok, torrent} ->
+        Logger.info(
+          "All hardlinks removed for torrent #{torrent.rd_id}, " <>
+            "enqueueing deletion from RealDebrid"
+        )
+
+        # Queue deletion job
+        SyncEngine.Workers.DeletionWorker.enqueue(torrent.id)
+        :ok
+
+      {:error, :not_found} ->
+        # Torrent already deleted
+        :ok
     end
   end
 
@@ -268,10 +345,20 @@ defmodule GrpcServer.FileSystemService.Server do
     read_size = if size == 0, do: nil, else: size
 
     # Resolve hard links to their target
-    with {:ok, target_id} <- resolve_for_file_ops(node_id),
-         {:ok, data} <- VFS.read_data(target_id, offset, read_size) do
-      %ReadFileResponse{data: data}
-    else
+    case resolve_for_file_ops(node_id) do
+      {:ok, target_id} ->
+        # Regular file: read from database
+        case VFS.read_data(target_id, offset, read_size) do
+          {:ok, data} ->
+            %ReadFileResponse{data: data}
+
+          {:error, :not_found} ->
+            raise GRPC.RPCError, status: :not_found, message: "Node not found"
+
+          {:error, _reason} ->
+            raise GRPC.RPCError, status: :internal, message: "Read operation failed"
+        end
+
       {:error, :not_found} ->
         raise GRPC.RPCError, status: :not_found, message: "Node not found"
 
@@ -338,19 +425,9 @@ defmodule GrpcServer.FileSystemService.Server do
   @spec get_stream_url(GetStreamUrlRequest.t(), GRPC.Server.Stream.t()) ::
           GetStreamUrlResponse.t()
   def get_stream_url(%GetStreamUrlRequest{node_id: node_id}, _stream) do
-    Logger.info("get_stream_url: node_id=#{node_id}")
-
     with {:ok, node} <- VFS.get_node(node_id),
-         _ <-
-           Logger.info(
-             "get_stream_url: got node name='#{node.name}', content_type='#{node.content_type}'"
-           ),
-         {:ok, target_node_id} <- resolve_node_for_streaming(node),
-         _ <- Logger.info("get_stream_url: resolved to target_node_id=#{target_node_id}"),
-         {:ok, torrent_file} <- get_torrent_file(target_node_id),
-         _ <- Logger.info("get_stream_url: got torrent_file, link=#{torrent_file.link}"),
+         {:ok, torrent_file} <- resolve_to_torrent_file(node),
          {:ok, download_url} <- get_or_fetch_download_url(torrent_file) do
-      Logger.info("get_stream_url: returning URL: #{String.slice(download_url, 0, 50)}...")
       %GetStreamUrlResponse{url: download_url}
     else
       {:error, :not_found} ->
@@ -422,16 +499,24 @@ defmodule GrpcServer.FileSystemService.Server do
 
   defp is_streamable?(node) do
     cond do
-      # Regular files with streamable content type are streamable
-      # Support both old and new content type naming
-      FileMode.regular?(node.mode) && node.content_type == "sync_engine/streamable" ->
-        true
+      # Torrent files are streamable if they have a link
+      is_struct(node, SyncEngine.Schemas.TorrentFile) ->
+        not is_nil(node.link)
 
-      # Hard links are streamable if they point to a streamable target
-      node.content_type == "inode/hardlink" ->
-        case resolve_link_target(node) do
-          {:ok, target_node} -> is_streamable?(target_node)
-          _ -> false
+      # Only hardlinks pointing to virtual inodes are streamable
+      # Regular POSIX hardlinks (pointing to regular VFS files) are NOT streamable
+      is_struct(node, VFS.Node) && VFS.is_hardlink?(node) ->
+        case VFS.extract_virtual_inode_id(node) do
+          {:ok, _inode_id} ->
+            # Virtual inode hardlink - check if the target torrent file is streamable
+            case resolve_link_target(node) do
+              {:ok, target_node} -> is_streamable?(target_node)
+              _ -> false
+            end
+
+          {:error, _} ->
+            # Regular POSIX hardlink - not streamable
+            false
         end
 
       true ->
@@ -440,15 +525,23 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   # Helper to resolve a hard link to its target node
+  # Virtual inode hardlinks point to streamable torrent files and can be used for streaming.
   defp resolve_link_target(node) do
-    target_path = node.data || ""
+    case VFS.extract_virtual_inode_id(node) do
+      {:ok, inode_id} ->
+        # Virtual inode - get the torrent file
+        case SyncEngine.Torrents.get_torrent_file_by_id(inode_id) do
+          {:ok, torrent_file} ->
+            {:ok, torrent_file}
 
-    case Integer.parse(target_path) do
-      {target_node_id, ""} ->
+          error ->
+            error
+        end
+
+      {:error, _} ->
+        # Regular POSIX hardlink - get the target VFS node
+        target_node_id = node.hardlink_target_id
         VFS.get_node(target_node_id)
-
-      _ ->
-        {:error, :invalid_target}
     end
   end
 
@@ -457,7 +550,7 @@ defmodule GrpcServer.FileSystemService.Server do
   # Otherwise returns the original node ID
   defp resolve_for_file_ops(node_id) do
     with {:ok, node} <- VFS.get_node(node_id) do
-      if node.content_type == "inode/hardlink" do
+      if VFS.is_hardlink?(node) do
         # Hard link - resolve to target
         case resolve_link_target(node) do
           {:ok, target_node} ->
@@ -474,64 +567,40 @@ defmodule GrpcServer.FileSystemService.Server do
     end
   end
 
-  # Resolves a node to its target for streaming purposes.
-  # If the node is a hard link, follows it and returns the target node ID.
-  # If the node is a regular file, returns its node ID.
-  # Returns {:error, :not_streamable} if the node is neither a regular file nor a hard link.
-  defp resolve_node_for_streaming(node) do
-    Logger.debug(
-      "resolve_node_for_streaming: node_id=#{node.id}, name='#{node.name}', content_type='#{node.content_type}', mode=#{node.mode}"
-    )
-
+  # Resolves a hardlink or virtual inode to its torrent file for streaming
+  # Only hardlinks (pointing to virtual inodes) can be streamed, never regular files.
+  # Regular files are read/write from disk and don't support streaming.
+  defp resolve_to_torrent_file(node) do
     cond do
-      FileMode.regular?(node.mode) && node.content_type != "inode/hardlink" ->
-        Logger.debug("resolve_node_for_streaming: regular file, returning node_id=#{node.id}")
-        {:ok, node.id}
-
-      # Hard links resolve to their target
-      node.content_type == "inode/hardlink" ->
+      # Only hardlinks pointing to virtual inodes can be streamable
+      VFS.is_hardlink?(node) ->
         Logger.info(
-          "resolve_node_for_streaming: resolving hard link node_id=#{node.id}, data='#{node.data}'"
+          "resolve_to_torrent_file: resolving hardlink node_id=#{node.id}, target_id=#{node.hardlink_target_id}"
         )
 
-        case resolve_link_target(node) do
-          {:ok, target_node} ->
-            Logger.info(
-              "resolve_node_for_streaming: hard link resolved to target_node_id=#{target_node.id}, name='#{target_node.name}'"
-            )
+        case VFS.extract_virtual_inode_id(node) do
+          {:ok, inode_id} ->
+            # Virtual inode hardlink - get torrent_file directly by ID
+            Logger.info("resolve_to_torrent_file: hardlink points to virtual inode #{inode_id}")
 
-            # Hard links cannot chain to other hard links, so target_node is always a regular file
-            {:ok, target_node.id}
+            case SyncEngine.Torrents.get_torrent_file_by_id(inode_id) do
+              {:ok, torrent_file} ->
+                Logger.info("resolve_to_torrent_file: got virtual inode torrent_file")
+                {:ok, torrent_file}
 
-          error ->
-            Logger.error(
-              "resolve_node_for_streaming: failed to resolve hard link: #{inspect(error)}"
-            )
+              error ->
+                error
+            end
 
-            error
+          {:error, _} ->
+            # Regular POSIX hardlink - not streamable
+            Logger.info("resolve_to_torrent_file: regular hardlink is not streamable")
+            {:error, :not_streamable}
         end
 
       true ->
+        # Regular files are not streamable (they're read/write from disk)
         {:error, :not_streamable}
-    end
-  end
-
-  # Attempts to get torrent file by node ID
-  # Returns {:error, :not_streamable} if:
-  #   - SyncEngine modules are not available (e.g., standalone test environment)
-  #   - The node is not associated with a torrent file
-  defp get_torrent_file(node_id) do
-    if Code.ensure_loaded?(SyncEngine.Torrents) do
-      case SyncEngine.Torrents.get_torrent_file_by_node_id(node_id) do
-        {:ok, torrent_file} ->
-          {:ok, torrent_file}
-
-        {:error, :not_found} ->
-          # Node exists but is not a streamable torrent file
-          {:error, :not_streamable}
-      end
-    else
-      {:error, :not_streamable}
     end
   end
 

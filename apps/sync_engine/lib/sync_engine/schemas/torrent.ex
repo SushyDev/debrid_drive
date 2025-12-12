@@ -60,7 +60,7 @@ defmodule SyncEngine.Schemas.Torrent do
       :deletion_last_attempted_at,
       :deletion_error
     ])
-    |> validate_required([:rd_id, :filename, :hash, :bytes, :node_id])
+    |> validate_required([:rd_id, :filename, :hash, :bytes])
     |> unique_constraint(:rd_id)
     |> unique_constraint(:hash)
     |> foreign_key_constraint(:node_id)

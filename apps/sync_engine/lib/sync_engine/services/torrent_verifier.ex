@@ -63,28 +63,45 @@ defmodule SyncEngine.Services.TorrentVerifier do
     Logger.debug("Verifying torrent: #{torrent.filename} (#{torrent.rd_id})")
 
     # First, check if the torrent's VFS node exists
-    case VFS.get_node(torrent.node_id) do
-      {:ok, _node} ->
-        # Node exists, now verify files
-        verify_torrent_files(torrent)
+    if torrent.node_id do
+      case VFS.get_node(torrent.node_id) do
+        {:ok, _node} ->
+          # Node exists, now verify files
+          verify_torrent_files(torrent)
 
-      {:error, :not_found} ->
-        # Torrent directory is missing, remove the torrent
-        Logger.warning(
-          "Torrent directory missing for #{torrent.filename}, removing from database"
-        )
+        {:error, :not_found} ->
+          # Torrent directory is missing, remove the torrent
+          Logger.warning(
+            "Torrent directory missing for #{torrent.filename}, removing from database"
+          )
 
-        case Torrents.delete_torrent(torrent) do
-          {:ok, _} ->
-            %{removed_files: 0, removed_torrent: true, errors: []}
+          case Torrents.delete_torrent(torrent) do
+            {:ok, _} ->
+              %{removed_files: 0, removed_torrent: true, errors: []}
 
-          {:error, reason} ->
-            %{
-              removed_files: 0,
-              removed_torrent: false,
-              errors: [{:delete_torrent_failed, torrent.rd_id, reason}]
-            }
-        end
+            {:error, reason} ->
+              %{
+                removed_files: 0,
+                removed_torrent: false,
+                errors: [{:delete_torrent_failed, torrent.rd_id, reason}]
+              }
+          end
+      end
+    else
+      # Torrent has no VFS node, remove it
+      Logger.warning("Torrent has no VFS node for #{torrent.filename}, removing from database")
+
+      case Torrents.delete_torrent(torrent) do
+        {:ok, _} ->
+          %{removed_files: 0, removed_torrent: true, errors: []}
+
+        {:error, reason} ->
+          %{
+            removed_files: 0,
+            removed_torrent: false,
+            errors: [{:delete_torrent_failed, torrent.rd_id, reason}]
+          }
+      end
     end
   end
 
@@ -122,14 +139,35 @@ defmodule SyncEngine.Services.TorrentVerifier do
   end
 
   defp verify_torrent_file(%TorrentFile{} = file) do
-    case VFS.get_node(file.node_id) do
-      {:ok, _node} ->
-        # File exists
-        %{removed: false, errors: []}
+    if file.node_id do
+      # Legacy: file has a direct VFS node
+      case VFS.get_node(file.node_id) do
+        {:ok, _node} ->
+          # File exists
+          %{removed: false, errors: []}
 
-      {:error, :not_found} ->
-        # File node is missing, remove from database
-        Logger.debug("File node #{file.node_id} missing, removing torrent file record")
+        {:error, :not_found} ->
+          # File node is missing, remove from database
+          Logger.debug("File node #{file.node_id} missing, removing torrent file record")
+
+          case Torrents.delete_torrent_file(file) do
+            {:ok, _} ->
+              %{removed: true, errors: []}
+
+            {:error, reason} ->
+              %{removed: false, errors: [{:delete_file_failed, file.id, reason}]}
+          end
+      end
+    else
+      # Virtual inode: check if there are hardlinks pointing to this torrent_file
+      hardlink_count = VFS.count_hardlinks_to_virtual_inode(file.id)
+
+      if hardlink_count > 0 do
+        # File has hardlinks, it exists
+        %{removed: false, errors: []}
+      else
+        # No hardlinks, remove from database
+        Logger.debug("Virtual inode #{file.id} has no hardlinks, removing torrent file record")
 
         case Torrents.delete_torrent_file(file) do
           {:ok, _} ->
@@ -138,6 +176,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
           {:error, reason} ->
             %{removed: false, errors: [{:delete_file_failed, file.id, reason}]}
         end
+      end
     end
   end
 
@@ -149,7 +188,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
           {:ok, _} ->
             # Also try to remove the VFS directory
             case VFS.remove_by_id(torrent.node_id) do
-              {:ok, _} ->
+              :ok ->
                 :ok
 
               {:error, :not_found} ->
@@ -161,7 +200,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
                   "Failed to remove VFS directory for torrent #{torrent.rd_id}: #{inspect(reason)}"
                 )
 
-                # Still return ok since database was cleaned up
+                # Still consider it successful since the torrent is deleted
                 :ok
             end
 

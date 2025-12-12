@@ -191,6 +191,111 @@ defmodule SyncEngine.TorrentsTest do
       {:ok, _} = Torrents.delete_torrent(torrent)
       assert length(Torrents.list_torrent_files(torrent.id)) == 0
     end
+
+    test "create_torrent_file/1 creates virtual inode (node_id: nil)", %{torrent: torrent} do
+      # Virtual inodes don't have a VFS node yet - just the torrent_file record
+      attrs = %{
+        rd_id: 2,
+        path: "/movie.mkv",
+        bytes: 2_000_000,
+        selected: 1,
+        torrent_id: torrent.id,
+        node_id: nil,
+        link: "https://real-debrid.com/unrestrict?link=abc123"
+      }
+
+      assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
+      assert file.rd_id == 2
+      assert file.path == "/movie.mkv"
+      assert file.torrent_id == torrent.id
+      assert file.node_id == nil
+      assert file.hardlink_count == 1
+      assert file.link == "https://real-debrid.com/unrestrict?link=abc123"
+    end
+
+    test "create_torrent_file/1 virtual inodes can have multiple hardlinks", %{torrent: torrent} do
+      # Create virtual inode
+      {:ok, virtual_inode} =
+        Torrents.create_torrent_file(%{
+          rd_id: 3,
+          path: "/series.mkv",
+          bytes: 3_000_000,
+          selected: 1,
+          torrent_id: torrent.id,
+          node_id: nil,
+          link: "https://real-debrid.com/unrestrict?link=def456"
+        })
+
+      assert virtual_inode.hardlink_count == 1
+
+      # Create multiple hardlinks to the same virtual inode
+      {:ok, _hardlink1} =
+        VFS.create_hardlink_to_virtual_inode(
+          torrent.node_id,
+          "link1.mkv",
+          virtual_inode.id,
+          size: 3_000_000
+        )
+
+      {:ok, _hardlink2} =
+        VFS.create_hardlink_to_virtual_inode(
+          torrent.node_id,
+          "link2.mkv",
+          virtual_inode.id,
+          size: 3_000_000
+        )
+
+      # Verify virtual inode still has hardlink_count of 1 (it's not incremented by hardlink creation)
+      {:ok, reloaded} = Torrents.get_torrent_file_by_id(virtual_inode.id)
+      assert reloaded.hardlink_count == 1
+
+      # Decrement: this is the last (and only) file in the torrent, so should_delete will be true
+      {:ok, {new_count, should_delete}} = Torrents.decrement_hardlink_count(reloaded)
+      assert new_count == 0
+      # TRUE because this is the only file in the torrent
+      assert should_delete == true
+
+      # For multi-file torrents, should_delete would be false unless all files have hardlink_count == 0
+    end
+
+    test "create_torrent_file/1 multi-file torrents require all files to reach 0", %{
+      torrent: torrent
+    } do
+      # Create two virtual inodes in the same torrent
+      {:ok, file1} =
+        Torrents.create_torrent_file(%{
+          rd_id: 4,
+          path: "/movie.mkv",
+          bytes: 5_000_000,
+          selected: 1,
+          torrent_id: torrent.id,
+          node_id: nil,
+          link: "https://real-debrid.com/link1"
+        })
+
+      {:ok, file2} =
+        Torrents.create_torrent_file(%{
+          rd_id: 5,
+          path: "/subtitle.srt",
+          bytes: 100_000,
+          selected: 1,
+          torrent_id: torrent.id,
+          node_id: nil,
+          link: "https://real-debrid.com/link2"
+        })
+
+      # Decrement file1: should_delete = false because file2 still has hardlink_count == 1
+      {:ok, {count1, should_delete1}} = Torrents.decrement_hardlink_count(file1)
+      assert count1 == 0
+      # file2 still has hardlink_count == 1
+      assert should_delete1 == false
+
+      # Decrement file2: should_delete = true because now ALL files have hardlink_count == 0
+      {:ok, {count2, should_delete2}} = Torrents.decrement_hardlink_count(file2)
+      assert count2 == 0
+      # NOW all files are at 0
+      assert should_delete2 == true
+    end
   end
 
   describe "rejected_torrents" do

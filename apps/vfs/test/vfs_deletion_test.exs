@@ -171,7 +171,7 @@ defmodule VFS.DeletionTest do
 
       # Hard link still exists (orphaned)
       assert {:ok, orphaned_link} = VFS.get_node(link.id)
-      assert orphaned_link.content_type == "inode/hardlink"
+      assert VFS.is_hardlink?(orphaned_link)
       assert orphaned_link.data == to_string(target.id)
     end
   end
@@ -247,7 +247,7 @@ defmodule VFS.DeletionTest do
 
       # External link still exists (orphaned)
       assert {:ok, orphaned} = VFS.get_node(external_link.id)
-      assert orphaned.content_type == "inode/hardlink"
+      assert VFS.is_hardlink?(orphaned)
     end
 
     test "cascade with cascade_hardlinks deletes external hard links too", %{root: root} do

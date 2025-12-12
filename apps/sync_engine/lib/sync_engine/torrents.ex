@@ -7,6 +7,7 @@ defmodule SyncEngine.Torrents do
 
   import Ecto.Query
   alias VFS.Repo
+  alias VFS.Node
   alias SyncEngine.Schemas.Torrent
   alias SyncEngine.Schemas.TorrentFile
   alias SyncEngine.Schemas.RejectedTorrent
@@ -334,54 +335,42 @@ defmodule SyncEngine.Torrents do
   Cleans up a torrent and its associated VFS nodes after successful API deletion.
 
   This is called by the sync engine after confirming the torrent is deleted from Real-Debrid.
+
+  In the new hardlink-based model (where TorrentFiles are virtual inodes):
+  - TorrentFiles are virtual inodes with no associated VFS file nodes
+  - Only hardlinks reference virtual inodes via data = "vi:{torrent_file_id}"
+  - All hardlinks pointing to deleted virtual inodes must also be deleted
+
   It removes:
-  1. All VFS file nodes for torrent files
-  2. All torrent_file records
+  1. All hard links pointing to the torrent's virtual inodes
+  2. All torrent_file records (the virtual inodes themselves)
   3. The torrent record
   4. The parent torrent directory (if empty)
-
-  ## Options
-    * `:cascade_hardlinks` - When true, also deletes hard links pointing to torrent files (default: false)
   """
-  def cleanup_after_deletion(torrent_id, opts \\ []) when is_integer(torrent_id) do
-    cascade_hardlinks = Keyword.get(opts, :cascade_hardlinks, false)
-
+  def cleanup_after_deletion(torrent_id, _opts \\ []) when is_integer(torrent_id) do
     result =
       Repo.transaction(fn ->
         case get_torrent(torrent_id) do
           {:ok, torrent} ->
-            # Preload files to get node_ids
+            # Preload files to find hardlinks pointing to them
             torrent = Repo.preload(torrent, :files)
 
             # Get the parent directory node_id (if exists)
             parent_node_id = torrent.node_id
 
-            # If cascade_hardlinks, delete all hard links pointing to these files
-            if cascade_hardlinks do
-              Enum.each(torrent.files, fn torrent_file ->
-                # Delete any hard links pointing to this file node
-                hardlinks = VFS.find_all_hardlinks_to_target(torrent_file.node_id)
-                Enum.each(hardlinks, fn link -> VFS.remove_by_id(link.id) end)
-              end)
-            end
+            # Delete all hard links pointing to this torrent's virtual inode files
+            # (Virtual inodes are being deleted, so hardlinks can't exist without them)
+            Enum.each(torrent.files, fn torrent_file ->
+              # Find hardlinks pointing to this virtual inode
+              # Hardlinks store "vi:{torrent_file_id}" in their data field
+              inode_ref = "vi:#{torrent_file.id}"
+              hardlinks = Repo.all(from(n in Node, where: n.data == ^inode_ref))
+              Enum.each(hardlinks, fn link -> VFS.remove_by_id(link.id) end)
+            end)
 
-            # Delete all torrent_file records FIRST (before VFS nodes)
-            # This removes the foreign key constraints
+            # Delete all torrent_file records (the virtual inodes)
             from(f in TorrentFile, where: f.torrent_id == ^torrent_id)
             |> Repo.delete_all()
-
-            # Now delete VFS file nodes for each torrent file
-            Enum.each(torrent.files, fn torrent_file ->
-              case VFS.get_node(torrent_file.node_id) do
-                {:ok, _node} ->
-                  # Delete the VFS file node
-                  VFS.remove_by_id(torrent_file.node_id)
-
-                {:error, :not_found} ->
-                  # Node already deleted, that's fine
-                  :ok
-              end
-            end)
 
             # Delete the torrent record
             Repo.delete!(torrent)
@@ -435,5 +424,79 @@ defmodule SyncEngine.Torrents do
 
     # Enqueue all deletion jobs in batch
     SyncEngine.Workers.DeletionWorker.enqueue_batch(torrent_ids)
+  end
+
+  # --- Virtual Inode Hardlink Management ---
+
+  @doc """
+  Increments the hardlink count for a virtual inode.
+  Called when a new hardlink is created to a torrent file.
+  """
+  def increment_hardlink_count(%TorrentFile{} = torrent_file) do
+    torrent_file
+    |> Ecto.Changeset.change(%{hardlink_count: torrent_file.hardlink_count + 1})
+    |> Repo.update()
+  end
+
+  @doc """
+  Decrements the hardlink count for a virtual inode.
+  Returns {new_count, should_delete_torrent}.
+
+  should_delete_torrent is true only when ALL files in the torrent have hardlink_count == 0.
+  This ensures we only delete the torrent from Remote Debrid when no hardlinks exist for any of its files.
+
+  Called when a hardlink is unlinked by the user.
+  """
+  def decrement_hardlink_count(%TorrentFile{} = torrent_file) do
+    new_count = max(0, torrent_file.hardlink_count - 1)
+
+    case update_torrent_file(torrent_file, %{hardlink_count: new_count}) do
+      {:ok, updated} ->
+        # Check if ALL files in the torrent now have hardlink_count == 0
+        torrent_id = torrent_file.torrent_id
+        all_files = list_torrent_files(torrent_id)
+
+        # Replace the updated file in the list for checking
+        all_files_updated =
+          Enum.map(all_files, fn f ->
+            if f.id == updated.id, do: updated, else: f
+          end)
+
+        should_delete = Enum.all?(all_files_updated, fn f -> f.hardlink_count == 0 end)
+        {:ok, {new_count, should_delete}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Verifies that a virtual inode's hardlink count matches actual hardlinks in VFS.
+  Auto-corrects if mismatch is found.
+  """
+  def verify_hardlink_count(%TorrentFile{} = torrent_file) do
+    actual_count = VFS.count_hardlinks_to_virtual_inode(torrent_file.id)
+
+    if actual_count != torrent_file.hardlink_count do
+      Logger.warning(
+        "Hardlink count mismatch for torrent_file #{torrent_file.id}: " <>
+          "expected #{torrent_file.hardlink_count}, got #{actual_count}"
+      )
+
+      # Auto-correct
+      update_torrent_file(torrent_file, %{hardlink_count: actual_count})
+    else
+      {:ok, torrent_file}
+    end
+  end
+
+  @doc """
+  Gets a torrent file by ID (for virtual inode lookup).
+  """
+  def get_torrent_file_by_id(id) do
+    case Repo.get(TorrentFile, id) do
+      nil -> {:error, :not_found}
+      file -> {:ok, file}
+    end
   end
 end
