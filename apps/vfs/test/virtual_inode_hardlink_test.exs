@@ -430,7 +430,8 @@ defmodule VirtualInodeHardlinkTest do
 
       # Hardlink should have is_hardlink set
       assert VFS.is_hardlink?(hardlink)
-      assert hardlink.hardlink_target_id == file.id
+      # POSIX hardlinks use hardlink_target_node_id, not hardlink_target_torrent_file_id
+      assert hardlink.hardlink_target_node_id == file.id
 
       # Extract should return error since this is NOT a virtual inode hardlink
       assert VFS.extract_virtual_inode_id(hardlink) == {:error, :not_virtual_inode}

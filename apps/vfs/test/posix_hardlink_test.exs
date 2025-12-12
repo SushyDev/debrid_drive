@@ -62,7 +62,7 @@ defmodule PosixHardlinkTest do
       assert hardlink.name == "link.txt"
       assert hardlink.parent_id == root.id
       assert VFS.is_hardlink?(hardlink)
-      assert hardlink.hardlink_target_id == target.id
+      assert hardlink.hardlink_target_node_id == target.id
       assert hardlink.size == target.size
       assert FileMode.regular?(hardlink.mode)
       # Data field stores the target node ID as a string (backward compatibility)
@@ -79,9 +79,9 @@ defmodule PosixHardlinkTest do
       {:ok, link3} = VFS.create_hardlink(root.id, "link3.txt", target.id)
 
       # All should point to the same target
-      assert link1.hardlink_target_id == target.id
-      assert link2.hardlink_target_id == target.id
-      assert link3.hardlink_target_id == target.id
+      assert link1.hardlink_target_node_id == target.id
+      assert link2.hardlink_target_node_id == target.id
+      assert link3.hardlink_target_node_id == target.id
 
       # All should be hardlinks
       assert VFS.is_hardlink?(link1)
@@ -107,8 +107,8 @@ defmodule PosixHardlinkTest do
       {:ok, link2} = VFS.create_hardlink(dir2.id, "link.txt", target.id)
 
       # Both should point to the same target
-      assert link1.hardlink_target_id == target.id
-      assert link2.hardlink_target_id == target.id
+      assert link1.hardlink_target_node_id == target.id
+      assert link2.hardlink_target_node_id == target.id
 
       # They should be in different parents
       assert link1.parent_id == dir1.id
@@ -137,7 +137,7 @@ defmodule PosixHardlinkTest do
 
       # Should create a hardlink to the directory
       assert VFS.is_hardlink?(hardlink)
-      assert hardlink.hardlink_target_id == dir.id
+      assert hardlink.hardlink_target_node_id == dir.id
       # Should inherit directory mode
       assert hardlink.mode == dir.mode
     end
@@ -163,7 +163,7 @@ defmodule PosixHardlinkTest do
 
       assert found.name == "link.txt"
       assert VFS.is_hardlink?(found)
-      assert found.hardlink_target_id == target.id
+      assert found.hardlink_target_node_id == target.id
     end
 
     test "get_node retrieves a hardlink by ID", %{root: root} do
@@ -178,7 +178,7 @@ defmodule PosixHardlinkTest do
 
       assert found.id == hardlink.id
       assert VFS.is_hardlink?(found)
-      assert found.hardlink_target_id == target.id
+      assert found.hardlink_target_node_id == target.id
     end
 
     test "list_children includes hardlinks", %{root: root} do
@@ -406,7 +406,7 @@ defmodule PosixHardlinkTest do
 
       # Should still be a hardlink pointing to same target
       assert VFS.is_hardlink?(renamed)
-      assert renamed.hardlink_target_id == target.id
+      assert renamed.hardlink_target_node_id == target.id
       assert renamed.name == "renamed_link.txt"
 
       # Old name should not be found
@@ -432,7 +432,7 @@ defmodule PosixHardlinkTest do
 
       # Should still be a hardlink pointing to same target
       assert VFS.is_hardlink?(moved)
-      assert moved.hardlink_target_id == target.id
+      assert moved.hardlink_target_node_id == target.id
       assert moved.parent_id == dir.id
 
       # Old location should not have it
@@ -541,7 +541,7 @@ defmodule PosixHardlinkTest do
       assert hardlink.data == to_string(target.id)
 
       # hardlink_target_id should also be set to target
-      assert hardlink.hardlink_target_id == target.id
+      assert hardlink.hardlink_target_node_id == target.id
 
       # is_hardlink should be true
       assert hardlink.is_hardlink == true
@@ -558,7 +558,7 @@ defmodule PosixHardlinkTest do
       assert VFS.is_hardlink?(posix_hardlink)
       # Data field stores target ID as string (not "vi:..." format)
       assert posix_hardlink.data == to_string(target.id)
-      assert posix_hardlink.hardlink_target_id == target.id
+      assert posix_hardlink.hardlink_target_node_id == target.id
 
       # extract_virtual_inode_id should distinguish it from virtual inode hardlinks
       # (POSIX hardlinks don't have data starting with "vi:")
@@ -585,8 +585,8 @@ defmodule PosixHardlinkTest do
 
       assert found1.id == link1.id
       assert found2.id == link2.id
-      assert link1.hardlink_target_id == target.id
-      assert link2.hardlink_target_id == target.id
+      assert link1.hardlink_target_node_id == target.id
+      assert link2.hardlink_target_node_id == target.id
     end
 
     test "deep directory hierarchy with hardlinks", %{root: root} do
@@ -603,7 +603,7 @@ defmodule PosixHardlinkTest do
 
       # Verify it works
       {:ok, found} = VFS.lookup(root.id, "link_to_deep.txt")
-      assert found.hardlink_target_id == target.id
+      assert found.hardlink_target_node_id == target.id
 
       # Hardlink should store target ID in data field
       assert found.data == to_string(target.id)
@@ -632,7 +632,7 @@ defmodule PosixHardlinkTest do
 
       # Should work fine
       assert VFS.is_hardlink?(hardlink)
-      assert hardlink.hardlink_target_id == target.id
+      assert hardlink.hardlink_target_node_id == target.id
     end
   end
 

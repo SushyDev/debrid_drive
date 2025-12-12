@@ -10,7 +10,9 @@ defmodule VFS.Node do
     field(:size, :integer, default: 0)
     field(:data, :binary)
     field(:is_hardlink, :boolean, default: false)
-    field(:hardlink_target_id, :integer)
+    # Explicit hardlink target columns
+    field(:hardlink_target_node_id, :integer)
+    field(:hardlink_target_torrent_file_id, :integer)
 
     belongs_to(:parent, __MODULE__, foreign_key: :parent_id)
     has_many(:children, __MODULE__, foreign_key: :parent_id)
@@ -29,7 +31,8 @@ defmodule VFS.Node do
       :size,
       :data,
       :is_hardlink,
-      :hardlink_target_id
+      :hardlink_target_node_id,
+      :hardlink_target_torrent_file_id
     ])
     |> validate_required([:name, :mode])
     |> validate_name()

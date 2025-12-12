@@ -108,10 +108,10 @@ defmodule VFS do
   end
 
   @doc """
-  Creates a hard link to an existing node.
+   Creates a hard link to an existing node.
 
-  The link appears as a regular file with the same mode and metadata as the target.
-  Sets the is_hardlink flag to true and stores the target node ID in hardlink_target_id.
+   The link appears as a regular file with the same mode and metadata as the target.
+   Sets the is_hardlink flag to true and stores the target node ID in hardlink_target_node_id.
 
   Note: This is not a true hard link (multiple directory entries to same inode),
   but provides equivalent semantics for read-only access.
@@ -132,7 +132,7 @@ defmodule VFS do
             data: to_string(target_node_id),
             size: target_node.size,
             is_hardlink: true,
-            hardlink_target_id: target_node_id
+            hardlink_target_node_id: target_node_id
           })
           |> Repo.insert()
       end
@@ -279,7 +279,7 @@ defmodule VFS do
 
           {:error, _} ->
             # Regular POSIX hardlink - delete with target cascade
-            target_id = node.hardlink_target_id
+            target_id = node.hardlink_target_node_id
 
             case get_node(target_id) do
               {:ok, target_node} ->
@@ -356,16 +356,9 @@ defmodule VFS do
   Returns 0 if no hard links exist.
   """
   def count_hardlinks_to_target(target_node_id) do
-    target_id_str = to_string(target_node_id)
-    # Regular file mode detection: (mode & 0o170000) == 0o100000
-    regular_file_mask = 0o170000
-    regular_file_type = 0o100000
-
     Repo.one(
       from(n in Node,
-        where:
-          fragment("(? & ?) = ?", n.mode, ^regular_file_mask, ^regular_file_type) and
-            n.data == ^target_id_str,
+        where: n.is_hardlink == true and n.hardlink_target_node_id == ^target_node_id,
         select: count(n.id)
       )
     ) || 0
@@ -378,7 +371,7 @@ defmodule VFS do
   def find_all_hardlinks_to_target(target_node_id) do
     Repo.all(
       from(node in Node,
-        where: node.is_hardlink == true and node.hardlink_target_id == ^target_node_id,
+        where: node.is_hardlink == true and node.hardlink_target_node_id == ^target_node_id,
         order_by: node.name
       )
     )
@@ -456,10 +449,10 @@ defmodule VFS do
   end
 
   @doc """
-  Creates a hardlink to a virtual inode (torrent file).
+   Creates a hardlink to a virtual inode (torrent file).
 
-  Virtual inodes are backed by torrent_files records instead of regular VFS nodes.
-  The hardlink stores "vi:{torrent_file_id}" in its data field to reference the inode.
+   Virtual inodes are backed by torrent_files records instead of regular VFS nodes.
+   The hardlink stores the torrent_file_id in hardlink_target_torrent_file_id field.
 
   ## Parameters
     - `parent_id`: Parent directory node ID
@@ -483,7 +476,7 @@ defmodule VFS do
       data: inode_ref,
       size: size,
       is_hardlink: true,
-      hardlink_target_id: virtual_inode_id
+      hardlink_target_torrent_file_id: virtual_inode_id
     })
     |> Repo.insert()
   end
@@ -496,7 +489,7 @@ defmodule VFS do
   def count_hardlinks_to_virtual_inode(virtual_inode_id) do
     Repo.one(
       from(n in Node,
-        where: n.is_hardlink == true and n.hardlink_target_id == ^virtual_inode_id,
+        where: n.is_hardlink == true and n.hardlink_target_torrent_file_id == ^virtual_inode_id,
         select: count(n.id)
       )
     ) || 0
@@ -510,7 +503,8 @@ defmodule VFS do
   def find_all_hardlinks_to_virtual_inode(virtual_inode_id) do
     Repo.all(
       from(node in Node,
-        where: node.is_hardlink == true and node.hardlink_target_id == ^virtual_inode_id,
+        where:
+          node.is_hardlink == true and node.hardlink_target_torrent_file_id == ^virtual_inode_id,
         order_by: node.name
       )
     )
@@ -520,25 +514,17 @@ defmodule VFS do
   Checks if a node is a hardlink.
 
   A node is a hardlink if its is_hardlink flag is explicitly set to true.
+  Handles both boolean true and integer 1 (from legacy database).
   This is POSIX-idiomatic and efficiently checks the explicit flag rather than parsing data.
 
   Returns true if it's a hardlink, false otherwise.
   """
   def is_hardlink?(node) do
-    node.is_hardlink == true
+    node.is_hardlink == true or node.is_hardlink == 1
   end
 
   @doc """
-  Extracts the virtual inode ID from a hardlink data field.
-
-  Returns:
-  - `{:ok, :virtual_inode, inode_id}` for "vi:123" format
-  - `{:ok, :target_node, node_id}` for old-style hardlink (backward compat)
-  @doc \"""
-  Extracts the virtual inode ID from a hardlink's hardlink_target_id field.
-
-  For virtual inode hardlinks, the data field contains "vi:XXX" format.
-  For regular POSIX hardlinks, the data field is just the node ID.
+  Extracts the virtual inode ID from a hardlink.
 
   Returns:
   - `{:ok, virtual_inode_id}` if it's a virtual inode hardlink
@@ -546,16 +532,21 @@ defmodule VFS do
   - `{:error, :not_a_hardlink}` if not a hardlink
   """
   def extract_virtual_inode_id(node) when is_map(node) do
-    if node.is_hardlink && node.hardlink_target_id do
-      # Check if this is a virtual inode hardlink by looking at the data field
-      if node.data && String.starts_with?(node.data, "vi:") do
-        {:ok, node.hardlink_target_id}
-      else
-        # Regular POSIX hardlink
+    # Note: is_hardlink can be 0/1 (from old DB as integer) or false/true (boolean)
+    is_hardlink_value = node.is_hardlink == true or node.is_hardlink == 1
+
+    cond do
+      # Not a hardlink at all
+      !is_hardlink_value ->
+        {:error, :not_a_hardlink}
+
+      # Virtual inode hardlink
+      node.hardlink_target_torrent_file_id ->
+        {:ok, node.hardlink_target_torrent_file_id}
+
+      # Regular POSIX hardlink
+      true ->
         {:error, :not_virtual_inode}
-      end
-    else
-      {:error, :not_a_hardlink}
     end
   end
 

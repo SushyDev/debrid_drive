@@ -498,30 +498,7 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   defp is_streamable?(node) do
-    cond do
-      # Torrent files are streamable if they have a link
-      is_struct(node, SyncEngine.Schemas.TorrentFile) ->
-        not is_nil(node.link)
-
-      # Only hardlinks pointing to virtual inodes are streamable
-      # Regular POSIX hardlinks (pointing to regular VFS files) are NOT streamable
-      is_struct(node, VFS.Node) && VFS.is_hardlink?(node) ->
-        case VFS.extract_virtual_inode_id(node) do
-          {:ok, _inode_id} ->
-            # Virtual inode hardlink - check if the target torrent file is streamable
-            case resolve_link_target(node) do
-              {:ok, target_node} -> is_streamable?(target_node)
-              _ -> false
-            end
-
-          {:error, _} ->
-            # Regular POSIX hardlink - not streamable
-            false
-        end
-
-      true ->
-        false
-    end
+    VFS.Streamability.streamable?(node)
   end
 
   # Helper to resolve a hard link to its target node
@@ -540,7 +517,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
       {:error, _} ->
         # Regular POSIX hardlink - get the target VFS node
-        target_node_id = node.hardlink_target_id
+        target_node_id = node.hardlink_target_node_id
         VFS.get_node(target_node_id)
     end
   end
@@ -575,7 +552,7 @@ defmodule GrpcServer.FileSystemService.Server do
       # Only hardlinks pointing to virtual inodes can be streamable
       VFS.is_hardlink?(node) ->
         Logger.info(
-          "resolve_to_torrent_file: resolving hardlink node_id=#{node.id}, target_id=#{node.hardlink_target_id}"
+          "resolve_to_torrent_file: resolving hardlink node_id=#{node.id}, node_target=#{node.hardlink_target_node_id}, inode_target=#{node.hardlink_target_torrent_file_id}"
         )
 
         case VFS.extract_virtual_inode_id(node) do
