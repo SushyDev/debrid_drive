@@ -184,7 +184,7 @@ defmodule SyncEngine.Services.TorrentSync do
                    ended: rd_torrent.ended,
                    speed: rd_torrent.speed,
                    seeders: rd_torrent.seeders,
-                   node_id: torrent_node.id
+                   inode_id: torrent_node.inode_id
                  }),
                # 3. Add files (using pre-fetched torrent_info)
                {:ok, _files} <-
@@ -270,7 +270,7 @@ defmodule SyncEngine.Services.TorrentSync do
     dir_parts = Enum.slice(path_parts, 0..-2//1)
 
     # Create directory structure if needed
-    with {:ok, parent_node} <- ensure_directory_structure(torrent_node.id, dir_parts),
+    with {:ok, parent_node} <- ensure_directory_structure(torrent_node.inode_id, dir_parts),
          # Create virtual inode first (without VFS node)
          {:ok, virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
@@ -305,12 +305,12 @@ defmodule SyncEngine.Services.TorrentSync do
     # Try to find existing directory
     case VFS.lookup(parent_id, sanitized_name) do
       {:ok, node} ->
-        ensure_directory_structure(node.id, rest)
+        ensure_directory_structure(node.inode_id, rest)
 
       {:error, :not_found} ->
         # Create new directory
         case VFS.create_directory(parent_id, sanitized_name) do
-          {:ok, node} -> ensure_directory_structure(node.id, rest)
+          {:ok, node} -> ensure_directory_structure(node.inode_id, rest)
           error -> error
         end
     end
@@ -322,9 +322,9 @@ defmodule SyncEngine.Services.TorrentSync do
     # Delete the torrent (cascade will handle files and VFS nodes)
     with {:ok, _} <- SyncEngine.Torrents.delete_torrent(db_torrent) do
       # Also delete the VFS node for the torrent directory with cascade, if it exists
-      if db_torrent.node_id do
+      if db_torrent.inode_id do
         try do
-          VFS.remove_by_id(db_torrent.node_id, cascade: true)
+          VFS.remove_by_id(db_torrent.inode_id, cascade: true)
           {:ok, db_torrent}
         rescue
           error ->

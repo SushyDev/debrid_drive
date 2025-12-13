@@ -8,6 +8,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   require Logger
   import Bitwise
+  import Ecto.Query
 
   alias VFS
   alias VFS.FileMode
@@ -50,7 +51,7 @@ defmodule GrpcServer.FileSystemService.Server do
   def root(_request, _stream) do
     case VFS.get_root() do
       {:ok, root} ->
-        %RootResponse{root: node_to_proto(root)}
+        %RootResponse{root: inode_to_proto(root, "/")}
 
       {:error, _reason} ->
         raise GRPC.RPCError, status: :internal, message: "Failed to retrieve root node"
@@ -65,7 +66,8 @@ defmodule GrpcServer.FileSystemService.Server do
     with {:ok, node} <- VFS.get_node(node_id),
          true <- FileMode.dir?(node.mode) do
       children = VFS.list_children(node_id)
-      nodes = Enum.map(children, &node_to_proto/1)
+      # list_children returns {directory_entry, inode} tuples
+      nodes = Enum.map(children, fn {entry, inode} -> inode_to_proto(inode, entry.name) end)
 
       %ReadDirAllResponse{nodes: nodes}
     else
@@ -86,8 +88,8 @@ defmodule GrpcServer.FileSystemService.Server do
     validate_name!(name)
 
     case VFS.lookup(node_id, name) do
-      {:ok, node} ->
-        %LookupResponse{node: node_to_proto(node)}
+      {:ok, inode} ->
+        %LookupResponse{node: inode_to_proto(inode, name)}
 
       {:error, :not_found} ->
         # Return empty response for FUSE ENOENT
@@ -106,8 +108,8 @@ defmodule GrpcServer.FileSystemService.Server do
     permissions = mode &&& 0o777
 
     case VFS.create_file(parent_id, name, mode: permissions) do
-      {:ok, node} ->
-        %CreateResponse{node: node_to_proto(node)}
+      {:ok, inode} ->
+        %CreateResponse{node: inode_to_proto(inode, name)}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
@@ -126,8 +128,8 @@ defmodule GrpcServer.FileSystemService.Server do
     validate_name!(name)
 
     case VFS.create_directory(parent_id, name) do
-      {:ok, node} ->
-        %MkdirResponse{node: node_to_proto(node)}
+      {:ok, inode} ->
+        %MkdirResponse{node: inode_to_proto(inode, name)}
 
       {:error, _reason} ->
         raise GRPC.RPCError, status: :internal, message: "Mkdir operation failed"
@@ -164,64 +166,58 @@ defmodule GrpcServer.FileSystemService.Server do
     end
   end
 
-  # Handle remove with special logic for hardlinks
-  # If it's a hardlink, decrement reference count. Otherwise, cascade delete.
+  # Handle remove with special logic for virtual inodes
+  # If it's a virtual inode, decrement reference count. Otherwise, cascade delete.
   defp handle_remove(parent_id, name) do
-    with {:ok, node} <- VFS.lookup(parent_id, name) do
-      if VFS.is_hardlink?(node) do
-        # Hardlink: handle reference counting
-        handle_hardlink_remove(node)
+    with {:ok, inode} <- VFS.lookup(parent_id, name) do
+      if VFS.is_hardlink?(inode) do
+        # Virtual inode: handle reference counting
+        handle_hardlink_remove(inode, parent_id, name)
       else
-        # Regular node: cascade delete
+        # Regular inode: cascade delete
         VFS.remove(parent_id, name, cascade: true)
       end
     end
   end
 
-  # Handle hardlink removal with virtual inode reference counting
-  defp handle_hardlink_remove(hardlink_node) do
-    case VFS.extract_virtual_inode_id(hardlink_node) do
-      {:ok, inode_id} ->
-        handle_virtual_inode_remove(hardlink_node, inode_id)
+  # Handle virtual inode removal with reference counting
+  defp handle_hardlink_remove(inode, parent_id, name) do
+    case VFS.extract_virtual_inode_id(inode) do
+      {:ok, virtual_inode_id} ->
+        handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name)
 
       {:error, _} ->
-        # Not a valid hardlink, just remove it
-        VFS.remove_by_id(hardlink_node.id, cascade: false)
+        # Regular inode, just remove it
+        VFS.remove(parent_id, name, cascade: false)
     end
   end
 
-  # Handle virtual inode hardlink removal with reference counting
-  # Uses a database transaction to ensure both decrement and hardlink removal succeed or fail together,
-  # preventing inconsistent state where the hardlink count is decremented but the node still exists.
-  defp handle_virtual_inode_remove(hardlink_node, virtual_inode_id) do
+  # Handle virtual inode removal with reference counting
+  # The VFS.remove function now handles nlink decrement automatically
+  defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
     VFS.Repo.transaction(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
         {:ok, virtual_inode} ->
-          # Decrement hardlink count within the transaction
-          case SyncEngine.Torrents.decrement_hardlink_count(virtual_inode) do
-            {:ok, {_new_count, should_delete_torrent}} ->
-              # Remove the hardlink node (also within the transaction)
-              case VFS.remove_by_id(hardlink_node.id, cascade: false) do
-                :ok ->
-                  # If all hardlinks removed, enqueue torrent deletion
-                  if should_delete_torrent do
-                    enqueue_torrent_deletion_on_remove(virtual_inode)
-                  end
+          # Check if this is the last link before removing
+          should_delete_torrent = inode.nlink == 1
 
-                  :ok
-
-                error ->
-                  VFS.Repo.rollback(error)
+          # Remove the directory entry (VFS handles nlink decrement)
+          case VFS.remove(parent_id, name, cascade: false) do
+            :ok ->
+              # If this was the last hardlink, enqueue torrent deletion
+              if should_delete_torrent do
+                enqueue_torrent_deletion_on_remove(virtual_inode)
               end
 
-            {:error, reason} ->
-              VFS.Repo.rollback(reason)
+              :ok
+
+            error ->
+              VFS.Repo.rollback(error)
           end
 
         {:error, :not_found} ->
           # Virtual inode already deleted, just remove the orphaned link
-          # This is still within the transaction for atomicity
-          case VFS.remove_by_id(hardlink_node.id, cascade: false) do
+          case VFS.remove(parent_id, name, cascade: false) do
             :ok -> :ok
             error -> VFS.Repo.rollback(error)
           end
@@ -269,9 +265,9 @@ defmodule GrpcServer.FileSystemService.Server do
     validate_name!(old_name)
     validate_name!(new_name)
 
-    with {:ok, node} <- VFS.lookup(old_parent_id, old_name),
-         {:ok, updated_node} <- VFS.move(node.id, new_parent_id, new_name) do
-      %RenameResponse{node: node_to_proto(updated_node)}
+    with {:ok, _result} <- VFS.move(old_parent_id, old_name, new_parent_id, new_name),
+         {:ok, updated_inode} <- VFS.lookup(new_parent_id, new_name) do
+      %RenameResponse{node: inode_to_proto(updated_inode, new_name)}
     else
       {:error, :not_found} ->
         raise GRPC.RPCError, status: :not_found, message: "Node not found"
@@ -294,29 +290,34 @@ defmodule GrpcServer.FileSystemService.Server do
   def link(%LinkRequest{node_id: target_node_id, parent_node_id: parent_id, name: name}, _stream) do
     validate_name!(name)
 
-    # Create hard link to target node
-    case VFS.create_hardlink(parent_id, name, target_node_id) do
-      {:ok, link_node} ->
-        %LinkResponse{node: node_to_proto(link_node)}
+    # Create hard link to target inode
+    try do
+      case VFS.create_hardlink(parent_id, name, target_node_id) do
+        {:ok, inode} ->
+          %LinkResponse{node: inode_to_proto(inode, name)}
 
-      {:error, :not_found} ->
+        {:error, :not_found} ->
+          raise GRPC.RPCError, status: :not_found, message: "Target node not found"
+
+        {:error, :cannot_link_to_hardlink} ->
+          raise GRPC.RPCError,
+            status: :invalid_argument,
+            message: "Cannot create a hard link to another hard link"
+
+        {:error, changeset} when is_struct(changeset, Ecto.Changeset) ->
+          # Handle validation errors
+          errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
+
+          raise GRPC.RPCError,
+            status: :invalid_argument,
+            message: "Invalid link: #{inspect(errors)}"
+
+        {:error, _reason} ->
+          raise GRPC.RPCError, status: :internal, message: "Link operation failed"
+      end
+    rescue
+      Ecto.NoResultsError ->
         raise GRPC.RPCError, status: :not_found, message: "Target node not found"
-
-      {:error, :cannot_link_to_hardlink} ->
-        raise GRPC.RPCError,
-          status: :invalid_argument,
-          message: "Cannot create a hard link to another hard link"
-
-      {:error, changeset} when is_struct(changeset, Ecto.Changeset) ->
-        # Handle validation errors
-        errors = Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
-
-        raise GRPC.RPCError,
-          status: :invalid_argument,
-          message: "Invalid link: #{inspect(errors)}"
-
-      {:error, _reason} ->
-        raise GRPC.RPCError, status: :internal, message: "Link operation failed"
     end
   end
 
@@ -328,9 +329,13 @@ defmodule GrpcServer.FileSystemService.Server do
   """
   @spec setattr(SetattrRequest.t(), GRPC.Server.Stream.t()) :: SetattrResponse.t()
   def setattr(%SetattrRequest{node_id: node_id} = request, _stream) do
-    with {:ok, node} <- VFS.get_node(node_id),
-         {:ok, updated_node} <- apply_setattr(node, request) do
-      %SetattrResponse{node: node_to_proto(updated_node)}
+    # For setattr, we need to get the name from a directory entry
+    # Since an inode can have multiple names (hardlinks), we'll just use the first one we find
+    with {:ok, inode} <- VFS.get_node(node_id),
+         {:ok, updated_inode} <- apply_setattr(inode, request) do
+      # Get any name for this inode for the response
+      name = get_any_name_for_inode(inode.inode_id)
+      %SetattrResponse{node: inode_to_proto(updated_inode, name)}
     else
       {:error, :not_found} ->
         raise GRPC.RPCError, status: :not_found, message: "Node not found"
@@ -346,6 +351,20 @@ defmodule GrpcServer.FileSystemService.Server do
         raise GRPC.RPCError,
           status: :internal,
           message: "Setattr operation failed: #{inspect(reason)}"
+    end
+  end
+
+  # Helper to get any name for an inode (for cases where we don't have the directory entry context)
+  defp get_any_name_for_inode(inode_id) do
+    case VFS.Repo.one(
+           from(de in VFS.DirectoryEntry,
+             where: de.inode_id == ^inode_id,
+             limit: 1,
+             select: de.name
+           )
+         ) do
+      nil -> "unknown"
+      name -> name
     end
   end
 
@@ -404,15 +423,15 @@ defmodule GrpcServer.FileSystemService.Server do
   @spec get_file_info(GetFileInfoRequest.t(), GRPC.Server.Stream.t()) :: GetFileInfoResponse.t()
   def get_file_info(%GetFileInfoRequest{node_id: node_id}, _stream) do
     case VFS.get_node(node_id) do
-      {:ok, node} ->
+      {:ok, inode} ->
         # Convert Elixir NaiveDateTime to Unix timestamp
-        {atime, atime_nsec} = datetime_to_unix(node.updated_at)
-        {mtime, mtime_nsec} = datetime_to_unix(node.updated_at)
-        {ctime, ctime_nsec} = datetime_to_unix(node.inserted_at)
+        {atime, atime_nsec} = datetime_to_unix(inode.updated_at)
+        {mtime, mtime_nsec} = datetime_to_unix(inode.updated_at)
+        {ctime, ctime_nsec} = datetime_to_unix(inode.inserted_at)
 
         %GetFileInfoResponse{
-          size: node.size || 0,
-          mode: node.mode,
+          size: inode.size || 0,
+          mode: inode.mode,
           atime: atime,
           atime_nsec: atime_nsec,
           mtime: mtime,
@@ -421,7 +440,7 @@ defmodule GrpcServer.FileSystemService.Server do
           ctime_nsec: ctime_nsec,
           uid: 0,
           gid: 0,
-          nlink: 1
+          nlink: inode.nlink
         }
 
       {:error, :not_found} ->
@@ -438,8 +457,8 @@ defmodule GrpcServer.FileSystemService.Server do
   @spec get_stream_url(GetStreamUrlRequest.t(), GRPC.Server.Stream.t()) ::
           GetStreamUrlResponse.t()
   def get_stream_url(%GetStreamUrlRequest{node_id: node_id}, _stream) do
-    with {:ok, node} <- VFS.get_node(node_id),
-         {:ok, torrent_file} <- resolve_to_torrent_file(node),
+    with {:ok, inode} <- VFS.get_node(node_id),
+         {:ok, torrent_file} <- resolve_to_torrent_file(inode),
          {:ok, download_url} <- get_or_fetch_download_url(torrent_file) do
       %GetStreamUrlResponse{url: download_url}
     else
@@ -486,18 +505,19 @@ defmodule GrpcServer.FileSystemService.Server do
     end
   end
 
-  defp node_to_proto(node) do
+  # Converts an inode (with name) to the proto Node format
+  defp inode_to_proto(inode, name) do
     # Convert Elixir NaiveDateTime to Unix timestamp
-    {atime, atime_nsec} = datetime_to_unix(node.updated_at)
-    {mtime, mtime_nsec} = datetime_to_unix(node.updated_at)
-    {ctime, ctime_nsec} = datetime_to_unix(node.inserted_at)
+    {atime, atime_nsec} = datetime_to_unix(inode.updated_at)
+    {mtime, mtime_nsec} = datetime_to_unix(inode.updated_at)
+    {ctime, ctime_nsec} = datetime_to_unix(inode.inserted_at)
 
     %Node{
-      id: node.id,
-      name: node.name,
-      mode: node.mode,
-      streamable: is_streamable?(node),
-      size: node.size || 0,
+      id: inode.inode_id,
+      name: name,
+      mode: inode.mode,
+      streamable: is_streamable?(inode),
+      size: inode.size || 0,
       atime: atime,
       atime_nsec: atime_nsec,
       mtime: mtime,
@@ -506,99 +526,41 @@ defmodule GrpcServer.FileSystemService.Server do
       ctime_nsec: ctime_nsec,
       uid: 0,
       gid: 0,
-      nlink: 1
+      nlink: inode.nlink
     }
   end
 
-  defp is_streamable?(node) do
-    VFS.Streamability.streamable?(node)
+  defp is_streamable?(inode) do
+    VFS.Streamability.streamable?(inode)
   end
 
-  # Helper to resolve a hard link to its target node
-  # Virtual inode hardlinks point to streamable torrent files and can be used for streaming.
-  #
-  # Returns {:ok, target} where target can be:
-  # - A TorrentFile struct (for virtual inode hardlinks)
-  # - A VFS.Node struct (for regular POSIX hardlinks)
-  #
-  # Both structs have an `id` field, but callers should be aware of the dual return type.
-  # Only use this function in contexts where the actual type doesn't matter (e.g., accessing the id field).
-  # For operations specific to the target type, use resolve_to_torrent_file/1 instead.
-  defp resolve_link_target(node) do
-    case VFS.extract_virtual_inode_id(node) do
-      {:ok, inode_id} ->
-        # Virtual inode - get the torrent file
-        case SyncEngine.Torrents.get_torrent_file_by_id(inode_id) do
-          {:ok, torrent_file} ->
-            {:ok, torrent_file}
-
-          error ->
-            error
-        end
-
-      {:error, _} ->
-        # Regular POSIX hardlink - get the target VFS node
-        target_node_id = node.hardlink_target_node_id
-        VFS.get_node(target_node_id)
-    end
+  # Resolves an inode for file operations (read, write, etc.)
+  # Virtual inodes don't need resolution, they're already the target
+  # Returns the inode_id
+  defp resolve_for_file_ops(inode_id) do
+    {:ok, inode_id}
   end
 
-  # Resolves a node ID for file operations (read, write, etc.)
-  # If the node is a hard link, returns the target node ID
-  # Otherwise returns the original node ID
-  defp resolve_for_file_ops(node_id) do
-    with {:ok, node} <- VFS.get_node(node_id) do
-      if VFS.is_hardlink?(node) do
-        # Hard link - resolve to target
-        case resolve_link_target(node) do
-          {:ok, target_node} ->
-            # Hard links cannot chain to other hard links, so target_node is always a regular file
-            {:ok, target_node.id}
+  # Resolves an inode to its torrent file for streaming
+  # Only virtual inodes can be streamed
+  defp resolve_to_torrent_file(inode) do
+    if inode.virtual_inode_type == "torrent_file" and inode.virtual_inode_id do
+      Logger.info(
+        "resolve_to_torrent_file: resolving virtual inode #{inode.inode_id} -> torrent_file #{inode.virtual_inode_id}"
+      )
 
-          error ->
-            error
-        end
-      else
-        # Regular file or directory - return as-is
-        {:ok, node_id}
+      case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
+        {:ok, torrent_file} ->
+          Logger.info("resolve_to_torrent_file: got torrent_file")
+          {:ok, torrent_file}
+
+        error ->
+          error
       end
-    end
-  end
-
-  # Resolves a hardlink or virtual inode to its torrent file for streaming
-  # Only hardlinks (pointing to virtual inodes) can be streamed, never regular files.
-  # Regular files are read/write from disk and don't support streaming.
-  defp resolve_to_torrent_file(node) do
-    cond do
-      # Only hardlinks pointing to virtual inodes can be streamable
-      VFS.is_hardlink?(node) ->
-        Logger.info(
-          "resolve_to_torrent_file: resolving hardlink node_id=#{node.id}, node_target=#{node.hardlink_target_node_id}, inode_target=#{node.hardlink_target_torrent_file_id}"
-        )
-
-        case VFS.extract_virtual_inode_id(node) do
-          {:ok, inode_id} ->
-            # Virtual inode hardlink - get torrent_file directly by ID
-            Logger.info("resolve_to_torrent_file: hardlink points to virtual inode #{inode_id}")
-
-            case SyncEngine.Torrents.get_torrent_file_by_id(inode_id) do
-              {:ok, torrent_file} ->
-                Logger.info("resolve_to_torrent_file: got virtual inode torrent_file")
-                {:ok, torrent_file}
-
-              error ->
-                error
-            end
-
-          {:error, _} ->
-            # Regular POSIX hardlink - not streamable
-            Logger.info("resolve_to_torrent_file: regular hardlink is not streamable")
-            {:error, :not_streamable}
-        end
-
-      true ->
-        # Regular files are not streamable (they're read/write from disk)
-        {:error, :not_streamable}
+    else
+      # Regular inode - not streamable
+      Logger.info("resolve_to_torrent_file: regular inode is not streamable")
+      {:error, :not_streamable}
     end
   end
 

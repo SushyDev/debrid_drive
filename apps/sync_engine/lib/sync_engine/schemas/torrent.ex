@@ -31,7 +31,8 @@ defmodule SyncEngine.Schemas.Torrent do
     field(:deletion_error, :string)
 
     # Relationships
-    belongs_to(:node, Node)
+    # Reference to the directory inode in VFS
+    field(:inode_id, :integer)
     has_many(:files, TorrentFile, on_delete: :delete_all)
 
     timestamps()
@@ -53,7 +54,7 @@ defmodule SyncEngine.Schemas.Torrent do
       :ended,
       :speed,
       :seeders,
-      :node_id,
+      :inode_id,
       :deletion_status,
       :deletion_requested_at,
       :deletion_attempts,
@@ -63,7 +64,7 @@ defmodule SyncEngine.Schemas.Torrent do
     |> validate_required([:rd_id, :filename, :hash, :bytes])
     |> unique_constraint(:rd_id)
     |> unique_constraint(:hash)
-    |> foreign_key_constraint(:node_id)
+    |> foreign_key_constraint(:inode_id)
   end
 
   @doc """

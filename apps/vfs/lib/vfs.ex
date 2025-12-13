@@ -1,16 +1,19 @@
 defmodule VFS do
   @moduledoc """
   The VFS context - public API for the filesystem.
+
+  Uses the POSIX inode system with separate inodes and directory entries.
   """
 
   import Ecto.Query, warn: false
   alias VFS.Repo
-  alias VFS.Node
+  alias VFS.Inode
+  alias VFS.DirectoryEntry
   alias VFS.FileMode
   alias SyncEngine.Schemas.Torrent
 
   @doc """
-  Gets the root node (where parent_id is nil).
+  Gets the root inode (inode_id=1).
   Creates it if it doesn't exist.
   Uses a transaction to handle race conditions and retries on busy errors.
   """
@@ -23,7 +26,7 @@ defmodule VFS do
   defp get_root_with_retry(attempts_left) do
     try do
       Repo.transaction(fn ->
-        case Repo.one(from(node in Node, where: is_nil(node.parent_id), limit: 1)) do
+        case Repo.get(Inode, 1) do
           nil ->
             # Root doesn't exist, create it
             case create_root() do
@@ -48,40 +51,67 @@ defmodule VFS do
   end
 
   @doc """
-  Creates the root directory node.
+  Creates the root directory inode.
+  Root always has inode_id=1.
   """
   def create_root do
-    %Node{}
-    |> Node.changeset(%{
-      name: "/",
-      mode: FileMode.directory_mode(),
-      parent_id: nil
-    })
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      # Create root inode
+      {:ok, inode} =
+        %Inode{}
+        |> Inode.changeset(%{
+          mode: FileMode.directory_mode(),
+          content_type: "inode/directory",
+          nlink: 1
+        })
+        |> Repo.insert()
+
+      # Ensure it got inode_id=1
+      if inode.inode_id != 1 do
+        Repo.rollback(:root_must_be_inode_1)
+      end
+
+      inode
+    end)
   end
 
   @doc """
-  Creates a directory node.
+  Creates a directory inode.
 
   ## Options
     * `:mode` - Unix permissions (default: 0o755)
   """
-  def create_directory(parent_id, name, opts \\ []) do
+  def create_directory(parent_inode_id, name, opts \\ []) do
     permissions = Keyword.get(opts, :mode, 0o755)
     mode = FileMode.directory_mode(permissions)
 
-    %Node{}
-    |> Node.changeset(%{
-      parent_id: parent_id,
-      name: name,
-      mode: mode,
-      content_type: "inode/directory"
-    })
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      # Create inode
+      {:ok, inode} =
+        %Inode{}
+        |> Inode.changeset(%{
+          mode: mode,
+          content_type: "inode/directory",
+          nlink: 1
+        })
+        |> Repo.insert()
+
+      # Create directory entry
+      {:ok, _entry} =
+        %DirectoryEntry{}
+        |> DirectoryEntry.changeset(%{
+          parent_inode_id: parent_inode_id,
+          name: name,
+          inode_id: inode.inode_id
+        })
+        |> Repo.insert()
+
+      inode
+    end)
   end
 
   @doc """
-  Creates a file node.
+  Creates a file inode.
 
   ## Options
     * `:mode` - Unix permissions (default: 0o644)
@@ -89,146 +119,251 @@ defmodule VFS do
     * `:content_type` - MIME type
     * `:size` - File size (calculated from data if not provided)
   """
-  def create_file(parent_id, name, opts \\ []) do
+  def create_file(parent_inode_id, name, opts \\ []) do
     permissions = Keyword.get(opts, :mode, 0o644)
     mode = FileMode.file_mode(permissions)
     data = Keyword.get(opts, :data)
     size = Keyword.get(opts, :size, if(data, do: byte_size(data), else: 0))
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
 
-    %Node{}
-    |> Node.changeset(%{
-      parent_id: parent_id,
-      name: name,
-      mode: mode,
-      data: data,
-      size: size,
-      content_type: content_type
-    })
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      # Create inode
+      {:ok, inode} =
+        %Inode{}
+        |> Inode.changeset(%{
+          mode: mode,
+          data: data,
+          size: size,
+          content_type: content_type,
+          nlink: 1
+        })
+        |> Repo.insert()
+
+      # Create directory entry
+      {:ok, _entry} =
+        %DirectoryEntry{}
+        |> DirectoryEntry.changeset(%{
+          parent_inode_id: parent_inode_id,
+          name: name,
+          inode_id: inode.inode_id
+        })
+        |> Repo.insert()
+
+      inode
+    end)
   end
 
   @doc """
-   Creates a hard link to an existing node.
+  Creates a hard link to an existing inode.
 
-   The link appears as a regular file with the same mode and metadata as the target.
-   Sets the is_hardlink flag to true and stores the target node ID in hardlink_target_node_id.
+  True POSIX hardlink: creates a new directory entry pointing to the same inode
+  and increments the inode's nlink count.
 
-  Note: This is not a true hard link (multiple directory entries to same inode),
-  but provides equivalent semantics for read-only access.
+  Special case: If the target is a virtual inode (streamable file),
+  this creates another hardlink to the same virtual inode.
+
+  ## Parameters
+    - `parent_inode_id`: Parent directory inode ID
+    - `name`: Name for the new hardlink
+    - `target_inode_id`: Inode ID to link to
+
+  ## Returns
+    - `{:ok, inode}` on success
+    - `{:error, reason}` on failure
   """
-  def create_hardlink(parent_id, name, target_node_id) do
-    with {:ok, target_node} <- get_node(target_node_id) do
-      case is_hardlink?(target_node) do
-        true ->
-          {:error, :cannot_link_to_hardlink}
+  def create_hardlink(parent_inode_id, name, target_inode_id) do
+    Repo.transaction(fn ->
+      # Get target inode
+      target_inode = Repo.get!(Inode, target_inode_id)
 
-        false ->
-          # Create a node that looks identical to the target but stores a reference
-          %Node{}
-          |> Node.changeset(%{
-            parent_id: parent_id,
-            name: name,
-            mode: target_node.mode,
-            data: to_string(target_node_id),
-            size: target_node.size,
-            is_hardlink: true,
-            hardlink_target_node_id: target_node_id
-          })
-          |> Repo.insert()
+      # Create directory entry pointing to same inode
+      case %DirectoryEntry{}
+           |> DirectoryEntry.changeset(%{
+             parent_inode_id: parent_inode_id,
+             name: name,
+             inode_id: target_inode.inode_id
+           })
+           |> Repo.insert() do
+        {:ok, _entry} ->
+          # Increment nlink count
+          {:ok, _updated_inode} =
+            target_inode
+            |> Inode.increment_nlink()
+            |> Repo.update()
+
+          # If this is a virtual inode, also increment the external hardlink count
+          if target_inode.virtual_inode_type == "torrent_file" do
+            case SyncEngine.Torrents.get_torrent_file_by_id(target_inode.virtual_inode_id) do
+              {:ok, torrent_file} ->
+                case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
+                  {:ok, _} -> :ok
+                  error -> Repo.rollback(error)
+                end
+
+              error ->
+                Repo.rollback(error)
+            end
+          end
+
+          target_inode
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
       end
-    end
+    end)
   end
 
   @doc """
-  Looks up a child node by name within a parent.
-  Returns {:ok, node} or {:error, :not_found}
+  Looks up a child inode by name within a parent.
+  Returns {:ok, inode} or {:error, :not_found}
   """
-  def lookup(parent_id, name) do
-    query =
-      case parent_id do
-        nil -> from(node in Node, where: is_nil(node.parent_id) and node.name == ^name)
-        value -> from(node in Node, where: node.parent_id == ^value and node.name == ^name)
-      end
+  def lookup(parent_inode_id, name) do
+    result =
+      from(de in DirectoryEntry,
+        where: de.parent_inode_id == ^parent_inode_id and de.name == ^name,
+        join: i in Inode,
+        on: de.inode_id == i.inode_id,
+        select: i
+      )
+      |> Repo.one()
 
-    case Repo.one(query) do
+    case result do
       nil -> {:error, :not_found}
-      node -> {:ok, node}
+      inode -> {:ok, inode}
     end
   end
 
   @doc """
-  Lists all children of a node.
+  Lists all children of a directory inode.
+  Returns a list of {directory_entry, inode} tuples.
   """
-  def list_children(node_id) do
-    Repo.all(from(node in Node, where: node.parent_id == ^node_id, order_by: node.name))
+  def list_children(inode_id) do
+    from(de in DirectoryEntry,
+      where: de.parent_inode_id == ^inode_id,
+      join: i in Inode,
+      on: de.inode_id == i.inode_id,
+      order_by: de.name,
+      select: {de, i}
+    )
+    |> Repo.all()
   end
 
   @doc """
-  Gets a node by ID.
+  Gets an inode by ID.
   """
-  def get_node(id) do
-    case Repo.get(Node, id) do
+  def get_node(inode_id) do
+    case Repo.get(Inode, inode_id) do
       nil -> {:error, :not_found}
-      node -> {:ok, node}
+      inode -> {:ok, inode}
     end
   end
 
   @doc """
-  Gets a node by ID, raises if not found.
+  Gets an inode by ID, raises if not found.
   """
-  def get_node!(id) do
-    Repo.get!(Node, id)
+  def get_node!(inode_id) do
+    Repo.get!(Inode, inode_id)
   end
 
   @doc """
-  Moves a node to a new parent and/or renames it.
+  Moves/renames a directory entry.
   """
-  def move(node_id, new_parent_id, new_name) do
-    node = Repo.get!(Node, node_id)
+  def move(parent_inode_id, old_name, new_parent_inode_id, new_name) do
+    Repo.transaction(fn ->
+      # Find the directory entry
+      entry =
+        Repo.one!(
+          from(de in DirectoryEntry,
+            where: de.parent_inode_id == ^parent_inode_id and de.name == ^old_name
+          )
+        )
 
-    node
-    |> Node.changeset(%{
-      parent_id: new_parent_id,
-      name: new_name
-    })
-    |> Repo.update()
+      # Update it
+      entry
+      |> DirectoryEntry.changeset(%{
+        parent_inode_id: new_parent_inode_id,
+        name: new_name
+      })
+      |> Repo.update!()
+    end)
   end
 
   @doc """
-  Removes a node by parent_id and name.
+  Removes a directory entry by parent_inode_id and name.
 
   ## Options
     * `:cascade` - When true, recursively delete directory contents (default: false)
-    * `:cascade_hardlinks` - When true, delete hard link target and all its links (default: false)
 
   ## Behaviors
-  - Regular files: Deleted immediately
-  - Hard links: Only the link is deleted, target remains (unless cascade_hardlinks: true)
-  - Directories: Must be empty (unless cascade: true)
-  - With cascade_hardlinks: Deletes target node and all hard links pointing to it
+  - Deletes the directory entry
+  - Decrements the inode's nlink count
+  - If nlink reaches 0, deletes the inode
+  - For virtual inodes, also decrements external hardlink count
+  - Directories must be empty unless cascade: true
 
   ## Returns
   - `:ok` on success
-  - `{:error, :not_found}` if node doesn't exist
+  - `{:error, :not_found}` if entry doesn't exist
   - `{:error, :directory_not_empty}` if directory has children and cascade is false
-  - `{:error, :cannot_delete_root}` if attempting to delete the root node
+  - `{:error, :cannot_delete_root}` if attempting to delete root
   """
-  def remove(parent_id, name, opts \\ [])
+  def remove(parent_inode_id, name, opts \\ [])
 
-  def remove(nil = _parent_id, "/" = _name, _opts) do
+  def remove(nil = _parent_inode_id, "/" = _name, _opts) do
     {:error, :cannot_delete_root}
   end
 
-  def remove(parent_id, name, opts) do
+  def remove(parent_inode_id, name, opts) do
     cascade = Keyword.get(opts, :cascade, true)
-    cascade_hardlinks = Keyword.get(opts, :cascade_hardlinks, false)
 
     result =
       Repo.transaction(fn ->
-        case lookup(parent_id, name) do
-          {:error, reason} -> Repo.rollback(reason)
-          {:ok, node} -> do_remove(node, cascade: cascade, cascade_hardlinks: cascade_hardlinks)
+        # Find directory entry
+        entry =
+          Repo.one(
+            from(de in DirectoryEntry,
+              where: de.parent_inode_id == ^parent_inode_id and de.name == ^name
+            )
+          )
+
+        if is_nil(entry) do
+          Repo.rollback(:not_found)
+        else
+          # Get inode
+          inode = Repo.get!(Inode, entry.inode_id)
+
+          # If directory, check if empty
+          if FileMode.dir?(inode.mode) do
+            children_count =
+              Repo.one(
+                from(de in DirectoryEntry,
+                  where: de.parent_inode_id == ^inode.inode_id,
+                  select: count(de.id)
+                )
+              )
+
+            if children_count > 0 and not cascade do
+              Repo.rollback(:directory_not_empty)
+            else
+              # Recursively delete children if cascade
+              if cascade and children_count > 0 do
+                children = list_children(inode.inode_id)
+
+                Enum.each(children, fn {child_entry, _child_inode} ->
+                  case remove(inode.inode_id, child_entry.name, cascade: true) do
+                    :ok -> :ok
+                    {:error, reason} -> Repo.rollback(reason)
+                  end
+                end)
+              end
+
+              # Delete this directory entry and decrement nlink
+              do_remove_entry(entry, inode)
+            end
+          else
+            # Regular file - just delete entry and decrement nlink
+            do_remove_entry(entry, inode)
+          end
         end
       end)
 
@@ -238,151 +373,99 @@ defmodule VFS do
     end
   end
 
-  @doc """
-  Removes a node by ID.
-  This will cascade delete children if the database is configured for it.
-  Returns :ok on success or error tuple.
-  """
-  def remove_by_id(node_id, opts \\ []) do
-    node = Repo.get!(Node, node_id)
-    result = do_remove(node, opts)
-    # do_remove returns deleted struct on success or error tuple on failure
-    if is_struct(result), do: :ok, else: result
+  # Helper to remove a directory entry and handle nlink
+  defp do_remove_entry(entry, inode) do
+    # Delete directory entry
+    Repo.delete!(entry)
+
+    # Decrement nlink
+    new_nlink = inode.nlink - 1
+
+    if new_nlink == 0 do
+      # Last link removed - delete inode
+      # If virtual inode, decrement external count first
+      if inode.virtual_inode_type == "torrent_file" do
+        case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
+          {:ok, torrent_file} ->
+            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+
+          _ ->
+            :ok
+        end
+      end
+
+      Repo.delete!(inode)
+    else
+      # Update nlink count
+      inode
+      |> Inode.changeset(%{nlink: new_nlink})
+      |> Repo.update!()
+
+      # If virtual inode, decrement external count
+      if inode.virtual_inode_type == "torrent_file" do
+        case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
+          {:ok, torrent_file} ->
+            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+
+          _ ->
+            :ok
+        end
+      end
+    end
+
+    :ok
   end
 
   @doc """
-  Removes a node by parent_id and name (legacy function).
+  Removes an inode by ID (legacy compatibility).
   """
-  def remove_by_name(parent_id, name, opts \\ []) do
-    case lookup(parent_id, name) do
-      {:ok, node} ->
-        result = do_remove(node, opts)
-        if is_struct(result), do: :ok, else: result
+  def remove_by_id(inode_id, opts \\ []) do
+    # Find any directory entry pointing to this inode
+    entry =
+      Repo.one(
+        from(de in DirectoryEntry,
+          where: de.inode_id == ^inode_id,
+          limit: 1
+        )
+      )
 
-      error ->
-        error
+    case entry do
+      nil -> {:error, :not_found}
+      entry -> remove(entry.parent_inode_id, entry.name, opts)
     end
   end
 
-  # Private helper for removal logic
-  defp do_remove(node, opts) do
-    cascade = Keyword.get(opts, :cascade, true)
-    cascade_hardlinks = Keyword.get(opts, :cascade_hardlinks, false)
-
-    cond do
-      # Handle virtual inode hardlink with cascade_hardlinks
-      is_hardlink?(node) and cascade_hardlinks ->
-        case extract_virtual_inode_id(node) do
-          {:ok, _inode_id} ->
-            # Virtual inode hardlink - just delete this hardlink
-            # The actual virtual inode cleanup is handled by SyncEngine.Torrents
-            Repo.delete!(node)
-
-          {:error, _} ->
-            # Regular POSIX hardlink - delete with target cascade
-            target_id = node.hardlink_target_node_id
-
-            case get_node(target_id) do
-              {:ok, target_node} ->
-                # Find all hard links pointing to this target
-                hardlinks = find_all_hardlinks_to_target(target_id)
-                # Delete all hard links (including this one)
-                Enum.each(hardlinks, fn link -> Repo.delete!(link) end)
-                # Then delete the target
-                Repo.delete!(target_node)
-
-              {:error, :not_found} ->
-                # Target already deleted, just delete this orphaned link
-                Repo.delete!(node)
-            end
-        end
-
-      # Handle regular hard link (just delete the link)
-      is_hardlink?(node) ->
-        Repo.delete!(node)
-
-      # Handle directory
-      FileMode.dir?(node.mode) ->
-        children = list_children(node.id)
-
-        if length(children) > 0 and not cascade do
-          Repo.rollback(:directory_not_empty)
-        else
-          # Recursively delete children if cascade is true
-          if cascade do
-            Enum.each(children, fn child ->
-              do_remove(child, cascade: true, cascade_hardlinks: cascade_hardlinks)
-            end)
-          end
-
-          # Before deleting the directory, check if cascade_hardlinks is set
-          # and delete any hard links pointing to files within
-          if cascade_hardlinks do
-            delete_hardlinks_to_node(node.id)
-          end
-
-          # Nullify any foreign key references from torrents to this directory
-          # This allows the directory deletion to proceed without constraint violations
-          nullify_torrent_node_references(node.id)
-
-          Repo.delete!(node)
-        end
-
-      # Handle regular file
-      true ->
-        # If cascade_hardlinks is true, delete all hard links pointing to this file
-        if cascade_hardlinks do
-          delete_hardlinks_to_node(node.id)
-        end
-
-        Repo.delete!(node)
+  @doc """
+  Counts the number of hard links to an inode.
+  Simply returns the nlink field.
+  """
+  def count_hardlinks_to_target(inode_id) do
+    case Repo.get(Inode, inode_id) do
+      nil -> 0
+      inode -> inode.nlink
     end
   end
 
-  # Helper to delete all hard links pointing to a target node
-  defp delete_hardlinks_to_node(target_node_id) do
-    hardlinks = find_all_hardlinks_to_target(target_node_id)
-    Enum.each(hardlinks, fn link -> Repo.delete!(link) end)
-  end
-
-  # Helper to nullify foreign key references from torrents to a node
-  # This prevents constraint violations when deleting a node that torrents reference
-  defp nullify_torrent_node_references(node_id) do
-    from(t in Torrent, where: t.node_id == ^node_id)
-    |> Repo.update_all(set: [node_id: nil])
-  end
-
   @doc """
-  Counts the number of hard links pointing to a specific target node.
-  Returns 0 if no hard links exist.
+  Finds all directory entries pointing to an inode.
+  Returns a list of {directory_entry, parent_inode} tuples.
   """
-  def count_hardlinks_to_target(target_node_id) do
-    Repo.one(
-      from(n in Node,
-        where: n.is_hardlink == true and n.hardlink_target_node_id == ^target_node_id,
-        select: count(n.id)
-      )
-    ) || 0
-  end
-
-  @doc """
-  Finds all hard link nodes pointing to a specific target node.
-  Returns a list of nodes (may be empty).
-  """
-  def find_all_hardlinks_to_target(target_node_id) do
-    Repo.all(
-      from(node in Node,
-        where: node.is_hardlink == true and node.hardlink_target_node_id == ^target_node_id,
-        order_by: node.name
-      )
+  def find_all_hardlinks_to_target(inode_id) do
+    from(de in DirectoryEntry,
+      where: de.inode_id == ^inode_id,
+      join: parent in Inode,
+      on: de.parent_inode_id == parent.inode_id,
+      order_by: de.name,
+      select: {de, parent}
     )
+    |> Repo.all()
   end
 
   @doc """
-   Updates the data and size of a node.
+  Updates the data and size of an inode.
   """
-  def write_data(node_id, data, offset \\ 0) do
-    node = Repo.get!(Node, node_id)
+  def write_data(inode_id, data, offset \\ 0) do
+    inode = Repo.get!(Inode, inode_id)
 
     new_data =
       case offset do
@@ -390,7 +473,7 @@ defmodule VFS do
           data
 
         _ ->
-          existing = node.data || <<>>
+          existing = inode.data || <<>>
           # Pad with zeros if offset is beyond current data
           padded =
             if byte_size(existing) < offset do
@@ -404,8 +487,8 @@ defmodule VFS do
           before <> data
       end
 
-    node
-    |> Node.changeset(%{
+    inode
+    |> Inode.changeset(%{
       data: new_data,
       size: byte_size(new_data)
     })
@@ -413,12 +496,12 @@ defmodule VFS do
   end
 
   @doc """
-  Reads data from a node with optional offset and size.
+  Reads data from an inode with optional offset and size.
   """
-  def read_data(node_id, offset \\ 0, size \\ nil) do
-    case get_node(node_id) do
-      {:ok, node} ->
-        data = node.data || <<>>
+  def read_data(inode_id, offset \\ 0, size \\ nil) do
+    case get_node(inode_id) do
+      {:ok, inode} ->
+        data = inode.data || <<>>
 
         result =
           if offset >= byte_size(data) do
@@ -439,117 +522,151 @@ defmodule VFS do
   end
 
   @doc """
-  Updates node attributes.
+  Updates inode attributes.
   """
-  def update_node(node_id, attrs) do
-    node = Repo.get!(Node, node_id)
+  def update_node(inode_id, attrs) do
+    inode = Repo.get!(Inode, inode_id)
 
-    node
-    |> Node.changeset(attrs)
+    inode
+    |> Inode.changeset(attrs)
     |> Repo.update()
   end
 
   @doc """
-   Creates a hardlink to a virtual inode (torrent file).
+  Creates a hardlink to a virtual inode (torrent file).
 
-   Virtual inodes are backed by torrent_files records instead of regular VFS nodes.
-   The hardlink stores the torrent_file_id in hardlink_target_torrent_file_id field.
+  Virtual inodes are backed by torrent_files records instead of regular file data.
 
   ## Parameters
-    - `parent_id`: Parent directory node ID
+    - `parent_inode_id`: Parent directory inode ID
     - `name`: Name of the hardlink
-    - `virtual_inode_id`: ID of the torrent_file (virtual inode)
+    - `virtual_inode_id`: ID of the torrent_file
     - `opts`: Options including :size for file size
 
   ## Returns
-    - `{:ok, node}` on success
+    - `{:ok, inode}` on success
     - `{:error, reason}` on failure
   """
-  def create_hardlink_to_virtual_inode(parent_id, name, virtual_inode_id, opts \\ []) do
+  def create_hardlink_to_virtual_inode(parent_inode_id, name, virtual_inode_id, opts \\ []) do
     size = Keyword.get(opts, :size, 0)
-    inode_ref = "vi:#{virtual_inode_id}"
 
-    %Node{}
-    |> Node.changeset(%{
-      parent_id: parent_id,
-      name: name,
-      mode: FileMode.file_mode(),
-      data: inode_ref,
-      size: size,
-      is_hardlink: true,
-      hardlink_target_torrent_file_id: virtual_inode_id
-    })
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      # Check if virtual inode already exists
+      existing_inode =
+        Repo.one(
+          from(i in Inode,
+            where:
+              i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id,
+            limit: 1
+          )
+        )
+
+      inode =
+        case existing_inode do
+          nil ->
+            # Create new virtual inode
+            {:ok, new_inode} =
+              %Inode{}
+              |> Inode.changeset(%{
+                mode: FileMode.file_mode(),
+                size: size,
+                nlink: 1,
+                virtual_inode_type: "torrent_file",
+                virtual_inode_id: virtual_inode_id
+              })
+              |> Repo.insert()
+
+            new_inode
+
+          inode ->
+            # Increment nlink on existing virtual inode
+            {:ok, updated} =
+              inode
+              |> Inode.increment_nlink()
+              |> Repo.update()
+
+            updated
+        end
+
+      # Create directory entry
+      {:ok, _entry} =
+        %DirectoryEntry{}
+        |> DirectoryEntry.changeset(%{
+          parent_inode_id: parent_inode_id,
+          name: name,
+          inode_id: inode.inode_id
+        })
+        |> Repo.insert()
+
+      inode
+    end)
   end
 
   @doc """
   Counts hardlinks pointing to a virtual inode.
-
-  Returns the number of nodes marked as hardlinks pointing to the given virtual inode.
   """
   def count_hardlinks_to_virtual_inode(virtual_inode_id) do
-    Repo.one(
-      from(n in Node,
-        where: n.is_hardlink == true and n.hardlink_target_torrent_file_id == ^virtual_inode_id,
-        select: count(n.id)
-      )
-    ) || 0
-  end
-
-  @doc """
-  Finds all hardlinks pointing to a virtual inode.
-
-  Returns a list of nodes that reference the given virtual inode.
-  """
-  def find_all_hardlinks_to_virtual_inode(virtual_inode_id) do
-    Repo.all(
-      from(node in Node,
-        where:
-          node.is_hardlink == true and node.hardlink_target_torrent_file_id == ^virtual_inode_id,
-        order_by: node.name
-      )
-    )
-  end
-
-  @doc """
-  Checks if a node is a hardlink.
-
-  A node is a hardlink if its is_hardlink flag is explicitly set to true.
-  Handles both boolean true and integer 1 (from legacy database).
-  This is POSIX-idiomatic and efficiently checks the explicit flag rather than parsing data.
-
-  Returns true if it's a hardlink, false otherwise.
-  """
-  def is_hardlink?(node) do
-    node.is_hardlink == true or node.is_hardlink == 1
-  end
-
-  @doc """
-  Extracts the virtual inode ID from a hardlink.
-
-  Returns:
-  - `{:ok, virtual_inode_id}` if it's a virtual inode hardlink
-  - `{:error, :not_virtual_inode}` if it's a regular POSIX hardlink
-  - `{:error, :not_a_hardlink}` if not a hardlink
-  """
-  def extract_virtual_inode_id(node) when is_map(node) do
-    # Note: is_hardlink can be 0/1 (from old DB as integer) or false/true (boolean)
-    is_hardlink_value = node.is_hardlink == true or node.is_hardlink == 1
-
-    cond do
-      # Not a hardlink at all
-      !is_hardlink_value ->
-        {:error, :not_a_hardlink}
-
-      # Virtual inode hardlink
-      node.hardlink_target_torrent_file_id ->
-        {:ok, node.hardlink_target_torrent_file_id}
-
-      # Regular POSIX hardlink
-      true ->
-        {:error, :not_virtual_inode}
+    case Repo.one(
+           from(i in Inode,
+             where:
+               i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id,
+             select: i.nlink
+           )
+         ) do
+      nil -> 0
+      nlink -> nlink
     end
   end
 
-  def extract_virtual_inode_id(_), do: {:error, :not_a_hardlink}
+  @doc """
+  Finds all directory entries pointing to a virtual inode.
+  """
+  def find_all_hardlinks_to_virtual_inode(virtual_inode_id) do
+    inode =
+      Repo.one(
+        from(i in Inode,
+          where:
+            i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id
+        )
+      )
+
+    case inode do
+      nil ->
+        []
+
+      inode ->
+        from(de in DirectoryEntry,
+          where: de.inode_id == ^inode.inode_id,
+          order_by: de.name
+        )
+        |> Repo.all()
+    end
+  end
+
+  @doc """
+  Checks if an inode is a virtual inode.
+  Returns true if it has virtual_inode_type and virtual_inode_id.
+  """
+  def is_hardlink?(inode) do
+    # In the new schema, all files with nlink > 1 are hardlinks
+    # But we keep this for compatibility - virtual inodes are identified by virtual_inode_type
+    not is_nil(inode.virtual_inode_type) && not is_nil(inode.virtual_inode_id)
+  end
+
+  @doc """
+  Extracts the virtual inode ID from an inode.
+
+  Returns:
+  - `{:ok, virtual_inode_id}` if it's a virtual inode
+  - `{:error, :not_virtual_inode}` if it's a regular inode
+  """
+  def extract_virtual_inode_id(inode) when is_map(inode) do
+    if inode.virtual_inode_type == "torrent_file" and inode.virtual_inode_id do
+      {:ok, inode.virtual_inode_id}
+    else
+      {:error, :not_virtual_inode}
+    end
+  end
+
+  def extract_virtual_inode_id(_), do: {:error, :not_virtual_inode}
 end

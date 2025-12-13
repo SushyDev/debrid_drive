@@ -272,15 +272,15 @@ defmodule SyncEngine.Services.Poller do
 
     case VFS.get_root() do
       {:ok, root} ->
-        case VFS.lookup(root.id, container_name) do
+        case VFS.lookup(root.inode_id, container_name) do
           {:ok, node} ->
-            node.id
+            node.inode_id
 
           {:error, :not_found} ->
-            case VFS.create_directory(root.id, container_name) do
+            case VFS.create_directory(root.inode_id, container_name) do
               {:ok, node} ->
                 Logger.info("#{__MODULE__} created #{container_name} directory")
-                node.id
+                node.inode_id
 
               {:error, reason} ->
                 Logger.error(

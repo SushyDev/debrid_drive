@@ -58,37 +58,36 @@ defmodule VFS.Streamability do
   - **Zero denormalization risk**: No cached state to desync
   """
 
-  alias VFS.{Node, Repo}
+  alias VFS.{Inode, Repo}
 
   @doc """
-  Determines if a node is streamable.
+  Determines if an inode is streamable.
 
-  A node is streamable if:
-  1. It's a hardlink (via VFS.is_hardlink?/1)
-  2. It points to a virtual inode (has hardlink_target_torrent_file_id set)
-  3. The target virtual inode has a download link
+  An inode is streamable if:
+  1. It's a virtual inode (has virtual_inode_type and virtual_inode_id)
+  2. The target virtual inode has a download link
 
   ## Strategy
-  - If the node has a `torrent_file` field attached, uses that (zero queries)
-  - If not but is a virtual inode hardlink, queries torrent_file by ID (one query)
+  - If the inode has a `torrent_file` field attached, uses that (zero queries)
+  - If not but is a virtual inode, queries torrent_file by ID (one query)
   - Otherwise returns false (no query)
 
   Also accepts map structs (like torrent_file) directly.
 
   ## Examples
-      iex> node = %VFS.Node{is_hardlink: true, hardlink_target_torrent_file_id: 123} |> Map.put(:torrent_file, %{link: "https://..."})
-      iex> VFS.Streamability.streamable?(node)
+      iex> inode = %VFS.Inode{virtual_inode_type: "torrent_file", virtual_inode_id: 123} |> Map.put(:torrent_file, %{link: "https://..."})
+      iex> VFS.Streamability.streamable?(inode)
       true
 
-      iex> node = %VFS.Node{is_hardlink: false}
-      iex> VFS.Streamability.streamable?(node)
+      iex> inode = %VFS.Inode{virtual_inode_type: nil}
+      iex> VFS.Streamability.streamable?(inode)
       false
   """
-  @spec streamable?(Node.t() | map()) :: boolean()
-  def streamable?(%Node{} = node) do
-    # Only hardlinks can be streamable
-    if VFS.is_hardlink?(node) do
-      check_hardlink_streamability(node)
+  @spec streamable?(Inode.t() | map()) :: boolean()
+  def streamable?(%Inode{} = inode) do
+    # Only virtual inodes can be streamable
+    if inode.virtual_inode_type == "torrent_file" and not is_nil(inode.virtual_inode_id) do
+      check_virtual_inode_streamability(inode)
     else
       false
     end
@@ -130,34 +129,35 @@ defmodule VFS.Streamability do
   def virtual_inode_streamable?(_), do: false
 
   @doc """
-  Preloads virtual inodes for a list of nodes efficiently.
+  Preloads virtual inodes for a list of inodes efficiently.
 
-  For all hardlinks in the list that point to virtual inodes, this loads their
-  target torrent_files in a single query. This allows subsequent
+  For all inodes in the list that are virtual inodes (torrent_files), this loads their
+  torrent_file data in a single query. This allows subsequent
   calls to `streamable?/1` to have zero additional queries.
 
   ## Usage
-      nodes = VFS.list_children(parent_id)
-      nodes = VFS.Streamability.preload_for_streamability(nodes)
+      inodes = VFS.list_children(parent_id) |> Enum.map(fn {_entry, inode} -> inode end)
+      inodes = VFS.Streamability.preload_for_streamability(inodes)
 
       # Now all streamable? checks use preloaded data
-      Enum.map(nodes, fn node ->
-        {node.name, VFS.Streamability.streamable?(node)}
+      Enum.map(inodes, fn inode ->
+        {inode.name, VFS.Streamability.streamable?(inode)}
       end)
 
   ## Performance
-  - Time: O(n log n) where n = number of nodes (due to sorting)
+  - Time: O(n log n) where n = number of inodes (due to sorting)
   - Queries: 1 (single query)
   - Compared to: n queries without preloading
   """
-  @spec preload_for_streamability([Node.t()]) :: [Node.t()]
-  def preload_for_streamability(nodes) when is_list(nodes) do
-    # Extract virtual inode IDs from hardlinks with hardlink_target_torrent_file_id
+  @spec preload_for_streamability([Inode.t()]) :: [Inode.t()]
+  def preload_for_streamability(inodes) when is_list(inodes) do
+    # Extract virtual inode IDs from virtual inodes (torrent_file type)
     virtual_inode_ids =
-      nodes
-      |> Enum.filter(&VFS.is_hardlink?/1)
-      |> Enum.filter(fn node -> !is_nil(node.hardlink_target_torrent_file_id) end)
-      |> Enum.map(fn node -> node.hardlink_target_torrent_file_id end)
+      inodes
+      |> Enum.filter(fn inode ->
+        inode.virtual_inode_type == "torrent_file" and not is_nil(inode.virtual_inode_id)
+      end)
+      |> Enum.map(fn inode -> inode.virtual_inode_id end)
       |> Enum.uniq()
 
     # Load all virtual inodes in a single query
@@ -185,20 +185,20 @@ defmodule VFS.Streamability do
         end
       end
 
-    # Inject preloaded torrent_files into nodes
-    Enum.map(nodes, fn node ->
-      case node.hardlink_target_torrent_file_id do
+    # Inject preloaded torrent_files into inodes
+    Enum.map(inodes, fn inode ->
+      case inode.virtual_inode_id do
         nil ->
-          node
+          inode
 
-        inode_id ->
-          case Map.fetch(torrent_files_map, inode_id) do
+        vid ->
+          case Map.fetch(torrent_files_map, vid) do
             {:ok, torrent_file} ->
               # Inject as a plain map field
-              Map.put(node, :torrent_file, torrent_file)
+              Map.put(inode, :torrent_file, torrent_file)
 
             :error ->
-              node
+              inode
           end
       end
     end)
@@ -206,17 +206,16 @@ defmodule VFS.Streamability do
 
   def preload_for_streamability(non_list), do: non_list
 
-  # Private: Check if a hardlink node is streamable
-  defp check_hardlink_streamability(node) do
-    # For virtual inode hardlinks, check if the target has a link
-    case node.hardlink_target_torrent_file_id do
+  # Private: Check if a virtual inode is streamable
+  defp check_virtual_inode_streamability(inode) do
+    # Virtual inode - try to get the torrent_file data
+    case inode.virtual_inode_id do
       nil ->
-        # Regular POSIX hardlink (not virtual inode) - never streamable
         false
 
-      inode_id ->
-        # Virtual inode hardlink - try to get the virtual inode
-        case get_virtual_inode(node, inode_id) do
+      vid ->
+        # Try to get the virtual inode (torrent_file)
+        case get_virtual_inode(inode, vid) do
           {:ok, torrent_file} -> virtual_inode_streamable?(torrent_file)
           {:error, _} -> false
         end
@@ -224,12 +223,12 @@ defmodule VFS.Streamability do
   end
 
   # Private: Get virtual inode, preferring preloaded data
-  defp get_virtual_inode(node, inode_id) do
-    # Check if torrent_file is already attached to the node
-    case Map.get(node, :torrent_file) do
+  defp get_virtual_inode(inode, vid) do
+    # Check if torrent_file is already attached to the inode
+    case Map.get(inode, :torrent_file) do
       nil ->
         # Not preloaded, query by ID
-        SyncEngine.Torrents.get_torrent_file_by_id(inode_id)
+        SyncEngine.Torrents.get_torrent_file_by_id(vid)
 
       torrent_file when is_map(torrent_file) ->
         # Preloaded or manually set map
@@ -237,7 +236,7 @@ defmodule VFS.Streamability do
 
       _ ->
         # Some other value, try querying
-        SyncEngine.Torrents.get_torrent_file_by_id(inode_id)
+        SyncEngine.Torrents.get_torrent_file_by_id(vid)
     end
   end
 end
