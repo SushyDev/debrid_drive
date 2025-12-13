@@ -113,12 +113,6 @@ defmodule SyncEngine.JobQueue do
   end
 
   @impl true
-  def handle_call(:clear, _from, state) do
-    new_state = %{state | queue: :queue.new()}
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
   def handle_info(:process_next, %{processing: nil} = state) do
     case :queue.out(state.queue) do
       {{:value, job}, new_queue} ->

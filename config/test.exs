@@ -3,6 +3,12 @@ import Config
 # Disable SQL query logging in tests
 config :logger, level: :warning
 
+# Disable gRPC logging in tests - set logger to only show errors
+config :logger, :console,
+  level: :warning,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:pid, :application, :module]
+
 # Configure the database for test environment to use SQL Sandbox
 if config_env() == :test do
   config :vfs, VFS.Repo,
@@ -33,6 +39,9 @@ config :sync_engine, Oban,
 
 # Use port 0 for gRPC server in tests to get random available port
 # This prevents port conflicts when running tests with dev server
+# Disable gRPC server and background services in tests to avoid Ecto.Sandbox ownership issues
 config :sync_engine,
   grpc_port: 0,
-  start_poller: false
+  start_poller: false,
+  start_grpc_server: false,
+  start_job_queue: false

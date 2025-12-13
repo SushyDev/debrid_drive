@@ -468,16 +468,16 @@ defmodule SyncEngine.Torrents do
 
       case Repo.update(changeset) do
         {:ok, updated} ->
-          # Now check if all files in the torrent have hardlink_count == 0
+          # Now check if ALL files in the torrent have hardlink_count == 0
           # This query is atomic within the transaction
           query =
             from(tf in TorrentFile,
               where: tf.torrent_id == ^updated.torrent_id,
-              select: min(tf.hardlink_count)
+              select: tf.hardlink_count
             )
 
-          min_count = Repo.one(query)
-          should_delete = min_count == 0
+          counts = Repo.all(query)
+          should_delete = Enum.all?(counts, &(&1 == 0))
 
           {new_count, should_delete}
 

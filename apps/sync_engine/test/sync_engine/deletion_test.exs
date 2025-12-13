@@ -19,9 +19,8 @@ defmodule SyncEngine.DeletionTest do
   import Ecto.Query
 
   setup do
-    # Use shared mode so that JobQueue and its Tasks can access the database
+    # Checkout sandbox connection for this test
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
 
     # SQLite: Temporarily disable foreign key constraints for cleanup
     Ecto.Adapters.SQL.query!(VFS.Repo, "PRAGMA foreign_keys = OFF", [])
@@ -316,7 +315,8 @@ defmodule SyncEngine.DeletionTest do
       end
 
       # Clear the queue to avoid API calls in tests
-      SyncEngine.JobQueue.clear()
+      # Note: JobQueue is disabled in test environment
+      # SyncEngine.JobQueue.clear()
 
       # Manually cleanup (simulating successful API deletion)
       for id <- torrent_ids do
