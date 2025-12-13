@@ -10,15 +10,18 @@ defmodule SyncEngine.Application do
     # Get gRPC port from config (environment-based)
     grpc_port = Application.get_env(:sync_engine, :grpc_port, 50051)
 
+    # Get the gRPC endpoint module from configuration
+    # This allows grpc_server to provide its endpoint without creating a hard dependency
+    endpoint_module = Application.get_env(:sync_engine, :grpc_endpoint, GrpcServer.Endpoint)
+
     children =
       [
         # Start shared RealDebrid client with rate limiting
         SyncEngine.RealDebridClient,
         # Start job queue for async operations
         SyncEngine.JobQueue,
-        # Start the gRPC server
-        {GRPC.Server.Supervisor,
-         endpoint: SyncEngine.Endpoint, port: grpc_port, start_server: true}
+        # Start the gRPC server with dynamically configured endpoint
+        {GRPC.Server.Supervisor, endpoint: endpoint_module, port: grpc_port, start_server: true}
       ] ++ poller_child()
 
     # Use rest_for_one strategy: if a child crashes, all children started AFTER it

@@ -7,6 +7,7 @@ defmodule VFS do
   alias VFS.Repo
   alias VFS.Node
   alias VFS.FileMode
+  alias SyncEngine.Schemas.Torrent
 
   @doc """
   Gets the root node (where parent_id is nil).
@@ -347,7 +348,7 @@ defmodule VFS do
   # Helper to nullify foreign key references from torrents to a node
   # This prevents constraint violations when deleting a node that torrents reference
   defp nullify_torrent_node_references(node_id) do
-    from(t in "torrents", where: t.node_id == ^node_id)
+    from(t in Torrent, where: t.node_id == ^node_id)
     |> Repo.update_all(set: [node_id: nil])
   end
 

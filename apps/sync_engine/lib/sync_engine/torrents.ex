@@ -361,10 +361,16 @@ defmodule SyncEngine.Torrents do
             # Delete all hard links pointing to this torrent's virtual inode files
             # (Virtual inodes are being deleted, so hardlinks can't exist without them)
             Enum.each(torrent.files, fn torrent_file ->
-              # Find hardlinks pointing to this virtual inode
-              # Hardlinks store "vi:{torrent_file_id}" in their data field
-              inode_ref = "vi:#{torrent_file.id}"
-              hardlinks = Repo.all(from(n in Node, where: n.data == ^inode_ref))
+              # Find hardlinks pointing to this virtual inode using is_hardlink and hardlink_target_id
+              hardlinks =
+                Repo.all(
+                  from(n in Node,
+                    where:
+                      n.is_hardlink == true and
+                        n.hardlink_target_torrent_file_id == ^torrent_file.id
+                  )
+                )
+
               Enum.each(hardlinks, fn link -> VFS.remove_by_id(link.id) end)
             end)
 
@@ -446,27 +452,42 @@ defmodule SyncEngine.Torrents do
   This ensures we only delete the torrent from Remote Debrid when no hardlinks exist for any of its files.
 
   Called when a hardlink is unlinked by the user.
+
+  Uses a database transaction to ensure atomic checking of all files in the torrent,
+  preventing race conditions where concurrent decrements could lead to incorrect
+  deletion decisions.
   """
   def decrement_hardlink_count(%TorrentFile{} = torrent_file) do
-    new_count = max(0, torrent_file.hardlink_count - 1)
+    Repo.transaction(fn ->
+      # Reload and lock the row for update within the transaction
+      locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
 
-    case update_torrent_file(torrent_file, %{hardlink_count: new_count}) do
-      {:ok, updated} ->
-        # Check if ALL files in the torrent now have hardlink_count == 0
-        torrent_id = torrent_file.torrent_id
-        all_files = list_torrent_files(torrent_id)
+      new_count = max(0, locked_file.hardlink_count - 1)
 
-        # Replace the updated file in the list for checking
-        all_files_updated =
-          Enum.map(all_files, fn f ->
-            if f.id == updated.id, do: updated, else: f
-          end)
+      changeset = Ecto.Changeset.change(locked_file, %{hardlink_count: new_count})
 
-        should_delete = Enum.all?(all_files_updated, fn f -> f.hardlink_count == 0 end)
-        {:ok, {new_count, should_delete}}
+      case Repo.update(changeset) do
+        {:ok, updated} ->
+          # Now check if all files in the torrent have hardlink_count == 0
+          # This query is atomic within the transaction
+          query =
+            from(tf in TorrentFile,
+              where: tf.torrent_id == ^updated.torrent_id,
+              select: min(tf.hardlink_count)
+            )
 
-      {:error, reason} ->
-        {:error, reason}
+          min_count = Repo.one(query)
+          should_delete = min_count == 0
+
+          {new_count, should_delete}
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, {new_count, should_delete}} -> {:ok, {new_count, should_delete}}
+      {:error, reason} -> {:error, reason}
     end
   end
 

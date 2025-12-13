@@ -191,33 +191,46 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   # Handle virtual inode hardlink removal with reference counting
+  # Uses a database transaction to ensure both decrement and hardlink removal succeed or fail together,
+  # preventing inconsistent state where the hardlink count is decremented but the node still exists.
   defp handle_virtual_inode_remove(hardlink_node, virtual_inode_id) do
-    case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
-      {:ok, virtual_inode} ->
-        # Decrement hardlink count
-        case SyncEngine.Torrents.decrement_hardlink_count(virtual_inode) do
-          {:ok, {_new_count, should_delete_torrent}} ->
-            # Remove the hardlink node
-            case VFS.remove_by_id(hardlink_node.id, cascade: false) do
-              :ok ->
-                # If all hardlinks removed, enqueue torrent deletion
-                if should_delete_torrent do
-                  enqueue_torrent_deletion_on_remove(virtual_inode)
-                end
+    VFS.Repo.transaction(fn ->
+      case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+        {:ok, virtual_inode} ->
+          # Decrement hardlink count within the transaction
+          case SyncEngine.Torrents.decrement_hardlink_count(virtual_inode) do
+            {:ok, {_new_count, should_delete_torrent}} ->
+              # Remove the hardlink node (also within the transaction)
+              case VFS.remove_by_id(hardlink_node.id, cascade: false) do
+                :ok ->
+                  # If all hardlinks removed, enqueue torrent deletion
+                  if should_delete_torrent do
+                    enqueue_torrent_deletion_on_remove(virtual_inode)
+                  end
 
-                :ok
+                  :ok
 
-              error ->
-                error
-            end
+                error ->
+                  VFS.Repo.rollback(error)
+              end
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+            {:error, reason} ->
+              VFS.Repo.rollback(reason)
+          end
 
-      {:error, :not_found} ->
-        # Virtual inode already deleted, just remove the orphaned link
-        VFS.remove_by_id(hardlink_node.id, cascade: false)
+        {:error, :not_found} ->
+          # Virtual inode already deleted, just remove the orphaned link
+          # This is still within the transaction for atomicity
+          case VFS.remove_by_id(hardlink_node.id, cascade: false) do
+            :ok -> :ok
+            error -> VFS.Repo.rollback(error)
+          end
+      end
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:ok, other} -> other
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -503,6 +516,14 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Helper to resolve a hard link to its target node
   # Virtual inode hardlinks point to streamable torrent files and can be used for streaming.
+  #
+  # Returns {:ok, target} where target can be:
+  # - A TorrentFile struct (for virtual inode hardlinks)
+  # - A VFS.Node struct (for regular POSIX hardlinks)
+  #
+  # Both structs have an `id` field, but callers should be aware of the dual return type.
+  # Only use this function in contexts where the actual type doesn't matter (e.g., accessing the id field).
+  # For operations specific to the target type, use resolve_to_torrent_file/1 instead.
   defp resolve_link_target(node) do
     case VFS.extract_virtual_inode_id(node) do
       {:ok, inode_id} ->

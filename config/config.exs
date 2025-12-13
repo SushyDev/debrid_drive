@@ -52,7 +52,9 @@ config :sync_engine,
   # Maximum number of torrents to sync per poll
   sync_limit: 100,
   # gRPC server port - can be overridden by GRPC_PORT env var
-  grpc_port: String.to_integer(System.get_env("GRPC_PORT") || "50051")
+  grpc_port: String.to_integer(System.get_env("GRPC_PORT") || "50051"),
+  # gRPC endpoint module - injected by grpc_server app at runtime
+  grpc_endpoint: GrpcServer.Endpoint
 
 # Import environment specific config
 import_config "#{config_env()}.exs"
