@@ -173,12 +173,12 @@ defmodule VFS.Inode do
   def decrement_nlink(inode) do
     new_nlink = inode.nlink - 1
 
-    if new_nlink >= 0 do
+    if new_nlink > 0 do
       changeset(inode, %{nlink: new_nlink})
     else
       inode
       |> changeset(%{})
-      |> add_error(:nlink, "cannot be less than 0")
+      |> add_error(:nlink, "cannot be less than 1")
     end
   end
 end

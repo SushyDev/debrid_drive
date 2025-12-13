@@ -1,5 +1,5 @@
 defmodule VFS.StreamabilityTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias VFS
   alias VFS.Streamability
@@ -14,7 +14,7 @@ defmodule VFS.StreamabilityTest do
     {:ok, root} = VFS.get_root()
 
     # Create a test torrent directory
-    {:ok, torrent_dir} = VFS.create_directory(root.id, "test_torrent_for_streaming")
+    {:ok, torrent_dir} = VFS.create_directory(root.inode_id, "test_torrent_for_streaming")
 
     # Create a test torrent record
     {:ok, torrent} =
@@ -31,7 +31,7 @@ defmodule VFS.StreamabilityTest do
         ended: "2024-01-02",
         speed: 0,
         seeders: 0,
-        node_id: torrent_dir.id
+        inode_id: torrent_dir.inode_id
       })
 
     {:ok, root: root, torrent_dir: torrent_dir, torrent: torrent}
@@ -39,18 +39,18 @@ defmodule VFS.StreamabilityTest do
 
   describe "streamable?/1 - Core Functionality" do
     test "returns false for regular files", %{root: root} do
-      {:ok, file} = VFS.create_file(root.id, "regular.txt", size: 100)
+      {:ok, file} = VFS.create_file(root.inode_id, "regular.txt", size: 100)
       refute Streamability.streamable?(file)
     end
 
     test "returns false for directories", %{root: root} do
-      {:ok, dir} = VFS.create_directory(root.id, "some_dir")
+      {:ok, dir} = VFS.create_directory(root.inode_id, "some_dir")
       refute Streamability.streamable?(dir)
     end
 
     test "returns false for POSIX hardlinks (not virtual inode)", %{root: root} do
-      {:ok, target} = VFS.create_file(root.id, "target.txt", size: 100)
-      {:ok, hardlink} = VFS.create_hardlink(root.id, "link.txt", target.id)
+      {:ok, target} = VFS.create_file(root.inode_id, "target.txt", size: 100)
+      {:ok, hardlink} = VFS.create_hardlink(root.inode_id, "link.txt", target.inode_id)
       refute Streamability.streamable?(hardlink)
     end
 
@@ -72,7 +72,7 @@ defmodule VFS.StreamabilityTest do
 
       {:ok, hardlink} =
         VFS.create_hardlink_to_virtual_inode(
-          torrent_dir.id,
+          torrent_dir.inode_id,
           "no_link_file.mkv",
           virtual_inode.id
         )
@@ -98,7 +98,7 @@ defmodule VFS.StreamabilityTest do
 
       {:ok, hardlink} =
         VFS.create_hardlink_to_virtual_inode(
-          torrent_dir.id,
+          torrent_dir.inode_id,
           "streamable_file.mkv",
           virtual_inode.id
         )
@@ -125,7 +125,7 @@ defmodule VFS.StreamabilityTest do
 
       {:ok, hardlink} =
         VFS.create_hardlink_to_virtual_inode(
-          torrent_dir.id,
+          torrent_dir.inode_id,
           "preloaded_file.mkv",
           virtual_inode.id
         )
@@ -212,10 +212,10 @@ defmodule VFS.StreamabilityTest do
 
       # Create hardlink
       {:ok, hl} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "file1.mkv", vi.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "file1.mkv", vi.id)
 
       # Create regular file
-      {:ok, regular} = VFS.create_file(torrent_dir.id, "regular.txt", size: 100)
+      {:ok, regular} = VFS.create_file(torrent_dir.inode_id, "regular.txt", size: 100)
 
       # Preload
       nodes = [hl, regular]
@@ -247,13 +247,13 @@ defmodule VFS.StreamabilityTest do
 
       # Create three hardlinks to same virtual inode
       {:ok, hl1} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "link1.mkv", vi.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "link1.mkv", vi.id)
 
       {:ok, hl2} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "link2.mkv", vi.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "link2.mkv", vi.id)
 
       {:ok, hl3} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "link3.mkv", vi.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "link3.mkv", vi.id)
 
       # Preload (should query virtual inode only once)
       nodes = [hl1, hl2, hl3]
@@ -288,7 +288,7 @@ defmodule VFS.StreamabilityTest do
         })
 
       {:ok, hardlink} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "idempotent.mkv", vi.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "idempotent.mkv", vi.id)
 
       # Preload once
       preloaded1 = Streamability.preload_for_streamability([hardlink])

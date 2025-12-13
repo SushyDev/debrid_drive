@@ -13,14 +13,14 @@ defmodule SyncEngine.TorrentsTest do
 
     # Create a root and test directory
     {:ok, root} = VFS.get_root()
-    {:ok, test_dir} = VFS.create_directory(root.id, "test_torrents")
+    {:ok, test_dir} = VFS.create_directory(root.inode_id, "test_torrents")
 
     {:ok, test_dir: test_dir, root: root}
   end
 
   describe "torrents" do
     test "create_torrent/1 creates a torrent with valid attributes", %{test_dir: test_dir} do
-      {:ok, node} = VFS.create_directory(test_dir.id, "test_torrent")
+      {:ok, node} = VFS.create_directory(test_dir.inode_id, "test_torrent")
 
       attrs = %{
         rd_id: "TEST123",
@@ -28,26 +28,26 @@ defmodule SyncEngine.TorrentsTest do
         hash: "abc123def456",
         bytes: 1_000_000,
         status: "downloaded",
-        node_id: node.id
+        inode_id: node.inode_id
       }
 
       assert {:ok, %Torrent{} = torrent} = Torrents.create_torrent(attrs)
       assert torrent.rd_id == "TEST123"
       assert torrent.filename == "Test Torrent"
       assert torrent.hash == "abc123def456"
-      assert torrent.node_id == node.id
+      assert torrent.inode_id == node.inode_id
     end
 
     test "create_torrent/1 fails with duplicate rd_id", %{test_dir: test_dir} do
-      {:ok, node1} = VFS.create_directory(test_dir.id, "torrent1")
-      {:ok, node2} = VFS.create_directory(test_dir.id, "torrent2")
+      {:ok, node1} = VFS.create_directory(test_dir.inode_id, "torrent1")
+      {:ok, node2} = VFS.create_directory(test_dir.inode_id, "torrent2")
 
       attrs1 = %{
         rd_id: "DUPLICATE123",
         filename: "First",
         hash: "hash1",
         bytes: 100,
-        node_id: node1.id
+        inode_id: node1.inode_id
       }
 
       attrs2 = %{
@@ -55,7 +55,7 @@ defmodule SyncEngine.TorrentsTest do
         filename: "Second",
         hash: "hash2",
         bytes: 200,
-        node_id: node2.id
+        inode_id: node2.inode_id
       }
 
       assert {:ok, _} = Torrents.create_torrent(attrs1)
@@ -64,14 +64,14 @@ defmodule SyncEngine.TorrentsTest do
     end
 
     test "get_torrent_by_rd_id/1 returns torrent", %{test_dir: test_dir} do
-      {:ok, node} = VFS.create_directory(test_dir.id, "test")
+      {:ok, node} = VFS.create_directory(test_dir.inode_id, "test")
 
       attrs = %{
         rd_id: "FIND_ME",
         filename: "Find Me",
         hash: "hash",
         bytes: 100,
-        node_id: node.id
+        inode_id: node.inode_id
       }
 
       {:ok, created} = Torrents.create_torrent(attrs)
@@ -80,14 +80,14 @@ defmodule SyncEngine.TorrentsTest do
     end
 
     test "delete_torrent/1 removes torrent", %{test_dir: test_dir} do
-      {:ok, node} = VFS.create_directory(test_dir.id, "delete_me")
+      {:ok, node} = VFS.create_directory(test_dir.inode_id, "delete_me")
 
       attrs = %{
         rd_id: "DELETE_ME",
         filename: "Delete Me",
         hash: "hash",
         bytes: 100,
-        node_id: node.id
+        inode_id: node.inode_id
       }
 
       {:ok, torrent} = Torrents.create_torrent(attrs)
@@ -96,8 +96,8 @@ defmodule SyncEngine.TorrentsTest do
     end
 
     test "get_torrents_by_rd_id/0 returns map of torrents", %{test_dir: test_dir} do
-      {:ok, node1} = VFS.create_directory(test_dir.id, "t1")
-      {:ok, node2} = VFS.create_directory(test_dir.id, "t2")
+      {:ok, node1} = VFS.create_directory(test_dir.inode_id, "t1")
+      {:ok, node2} = VFS.create_directory(test_dir.inode_id, "t2")
 
       {:ok, _} =
         Torrents.create_torrent(%{
@@ -105,7 +105,7 @@ defmodule SyncEngine.TorrentsTest do
           filename: "Torrent 1",
           hash: "h1",
           bytes: 100,
-          node_id: node1.id
+          inode_id: node1.inode_id
         })
 
       {:ok, _} =
@@ -114,7 +114,7 @@ defmodule SyncEngine.TorrentsTest do
           filename: "Torrent 2",
           hash: "h2",
           bytes: 200,
-          node_id: node2.id
+          inode_id: node2.inode_id
         })
 
       map = Torrents.get_torrents_by_rd_id()
@@ -126,7 +126,7 @@ defmodule SyncEngine.TorrentsTest do
 
   describe "torrent_files" do
     setup %{test_dir: test_dir} do
-      {:ok, torrent_node} = VFS.create_directory(test_dir.id, "torrent")
+      {:ok, torrent_node} = VFS.create_directory(test_dir.inode_id, "torrent")
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
@@ -134,10 +134,10 @@ defmodule SyncEngine.TorrentsTest do
           filename: "Test Torrent",
           hash: "hash",
           bytes: 1000,
-          node_id: torrent_node.id
+          inode_id: torrent_node.inode_id
         })
 
-      {:ok, file_node} = VFS.create_file(torrent_node.id, "test_file.mp4", size: 500)
+      {:ok, file_node} = VFS.create_file(torrent_node.inode_id, "test_file.mp4", size: 500)
 
       {:ok, torrent: torrent, file_node: file_node}
     end
@@ -149,7 +149,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 500,
         selected: 1,
         torrent_id: torrent.id,
-        node_id: file_node.id
+        inode_id: file_node.inode_id
       }
 
       assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
@@ -169,7 +169,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 500,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       files = Torrents.list_torrent_files(torrent.id)
@@ -184,7 +184,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 500,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       assert length(Torrents.list_torrent_files(torrent.id)) == 1
@@ -192,7 +192,7 @@ defmodule SyncEngine.TorrentsTest do
       assert length(Torrents.list_torrent_files(torrent.id)) == 0
     end
 
-    test "create_torrent_file/1 creates virtual inode (node_id: nil)", %{torrent: torrent} do
+    test "create_torrent_file/1 creates virtual inode (inode_id: nil)", %{torrent: torrent} do
       # Virtual inodes don't have a VFS node yet - just the torrent_file record
       attrs = %{
         rd_id: 2,
@@ -200,7 +200,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 2_000_000,
         selected: 1,
         torrent_id: torrent.id,
-        node_id: nil,
+        inode_id: nil,
         link: "https://real-debrid.com/unrestrict?link=abc123"
       }
 
@@ -208,7 +208,7 @@ defmodule SyncEngine.TorrentsTest do
       assert file.rd_id == 2
       assert file.path == "/movie.mkv"
       assert file.torrent_id == torrent.id
-      assert file.node_id == nil
+      assert file.inode_id == nil
       assert file.hardlink_count == 1
       assert file.link == "https://real-debrid.com/unrestrict?link=abc123"
     end
@@ -222,7 +222,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 3_000_000,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: nil,
+          inode_id: nil,
           link: "https://real-debrid.com/unrestrict?link=def456"
         })
 
@@ -231,7 +231,7 @@ defmodule SyncEngine.TorrentsTest do
       # Create multiple hardlinks to the same virtual inode
       {:ok, _hardlink1} =
         VFS.create_hardlink_to_virtual_inode(
-          torrent.node_id,
+          torrent.inode_id,
           "link1.mkv",
           virtual_inode.id,
           size: 3_000_000
@@ -239,21 +239,21 @@ defmodule SyncEngine.TorrentsTest do
 
       {:ok, _hardlink2} =
         VFS.create_hardlink_to_virtual_inode(
-          torrent.node_id,
+          torrent.inode_id,
           "link2.mkv",
           virtual_inode.id,
           size: 3_000_000
         )
 
-      # Verify virtual inode still has hardlink_count of 1 (it's not incremented by hardlink creation)
+      # Verify virtual inode hardlink_count is incremented (was 1, now 3 after 2 more links)
       {:ok, reloaded} = Torrents.get_torrent_file_by_id(virtual_inode.id)
-      assert reloaded.hardlink_count == 1
+      assert reloaded.hardlink_count == 3
 
-      # Decrement: this is the last (and only) file in the torrent, so should_delete will be true
+      # Decrement: after one decrement, count should be 2
       {:ok, {new_count, should_delete}} = Torrents.decrement_hardlink_count(reloaded)
-      assert new_count == 0
-      # TRUE because this is the only file in the torrent
-      assert should_delete == true
+      assert new_count == 2
+      # FALSE because there are still 2 hardlinks remaining
+      assert should_delete == false
 
       # For multi-file torrents, should_delete would be false unless all files have hardlink_count == 0
     end
@@ -269,7 +269,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 5_000_000,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: nil,
+          inode_id: nil,
           link: "https://real-debrid.com/link1"
         })
 
@@ -280,7 +280,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 100_000,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: nil,
+          inode_id: nil,
           link: "https://real-debrid.com/link2"
         })
 

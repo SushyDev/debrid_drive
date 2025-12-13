@@ -136,12 +136,14 @@ defmodule VFS.Streamability do
   calls to `streamable?/1` to have zero additional queries.
 
   ## Usage
-      inodes = VFS.list_children(parent_id) |> Enum.map(fn {_entry, inode} -> inode end)
+      children = VFS.list_children(parent_id)
+      inodes = Enum.map(children, fn {_entry, inode} -> inode end)
       inodes = VFS.Streamability.preload_for_streamability(inodes)
 
       # Now all streamable? checks use preloaded data
-      Enum.map(inodes, fn inode ->
-        {inode.name, VFS.Streamability.streamable?(inode)}
+      Enum.zip(children, inodes)
+      |> Enum.map(fn {{entry, _old_inode}, preloaded_inode} ->
+        {entry.name, VFS.Streamability.streamable?(preloaded_inode)}
       end)
 
   ## Performance

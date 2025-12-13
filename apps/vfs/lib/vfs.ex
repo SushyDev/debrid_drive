@@ -576,6 +576,18 @@ defmodule VFS do
               })
               |> Repo.insert()
 
+            # Increment the external hardlink count on the torrent_file
+            case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+              {:ok, torrent_file} ->
+                case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
+                  {:ok, _} -> :ok
+                  error -> Repo.rollback(error)
+                end
+
+              error ->
+                Repo.rollback(error)
+            end
+
             new_inode
 
           inode ->
@@ -584,6 +596,18 @@ defmodule VFS do
               inode
               |> Inode.increment_nlink()
               |> Repo.update()
+
+            # Also increment the external hardlink count on the torrent_file
+            case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+              {:ok, torrent_file} ->
+                case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
+                  {:ok, _} -> :ok
+                  error -> Repo.rollback(error)
+                end
+
+              error ->
+                Repo.rollback(error)
+            end
 
             updated
         end

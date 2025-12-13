@@ -14,8 +14,9 @@ defmodule GrpcServer.E2E.HardLinkTest do
   alias SyncEngine.Schemas.{Torrent, TorrentFile}
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+    :ok = GrpcTestHelper.cleanup_database()
+
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
     channel = connect()
 
@@ -373,7 +374,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
       assert lookup_resp.node.id == link_id
 
       # The inode is still accessible
-      {:ok, inode} = VFS.get_node(link_id)
+      {:ok, inode} = VFS.get_node(target_id)
       # Down from 2 to 1
       assert inode.nlink == 1
     end

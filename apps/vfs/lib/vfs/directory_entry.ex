@@ -75,6 +75,7 @@ defmodule VFS.DirectoryEntry do
     changeset
     |> validate_length(:name, min: 1, max: 255)
     |> validate_format(:name, ~r/^[^\/\0]+$/, message: "cannot contain / or null bytes")
+    |> validate_exclusion(:name, [".", ".."], message: "cannot use reserved names . or ..")
   end
 
   @doc """

@@ -274,7 +274,7 @@ config :sync_engine,
   sync_limit: 100
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for complete details.
+See [Configuration Guide](CONFIGURATION.md) for complete details.
 
 ---
 
@@ -414,7 +414,7 @@ client = SyncEngine.RealDebridClient.get_client()
 SyncEngine.Services.TorrentSync.sync(client, torrents_root_id: root.id)
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for more troubleshooting.
+See [Configuration Guide](CONFIGURATION.md) for more troubleshooting.
 
 ---
 
@@ -461,7 +461,7 @@ debrid_drive_ex/
 
 ## License
 
-[LICENSE.md](docs/LICENSE.md)
+[LICENSE.md](LICENSE.md)
 
 ---
 

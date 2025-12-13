@@ -10,11 +10,9 @@ defmodule GrpcServer.E2E.FilesystemCorrectnessTest do
   alias VFS
 
   setup do
-    # Start sandbox for this test
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
+    :ok = GrpcTestHelper.cleanup_database()
 
-    # Allow the gRPC server and any spawned processes to use this connection
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
     # Connect to gRPC server (assumes server is running)
     channel = connect()

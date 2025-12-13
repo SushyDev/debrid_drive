@@ -22,8 +22,9 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
   alias SyncEngine.Schemas.{Torrent, TorrentFile}
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+    :ok = GrpcTestHelper.cleanup_database()
+
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
     channel = connect()
 
@@ -89,10 +90,11 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       {:ok, lookup_resp} = lookup(channel, root_id, "big_movie.mkv")
       assert lookup_resp.node.streamable == true
       assert lookup_resp.node.size == 5_000_000_000
-      assert lookup_resp.node.id == original_hardlink.id
+      assert lookup_resp.node.id == original_hardlink.inode_id
 
       # "Copy" the file using Link RPC (what should happen in file managers)
-      {:ok, copy_resp} = create_link(channel, original_hardlink.id, root_id, "big_movie_copy.mkv")
+      {:ok, copy_resp} =
+        create_link(channel, original_hardlink.inode_id, root_id, "big_movie_copy.mkv")
 
       # Verify the copy exists and is streamable
       {:ok, copy_lookup_resp} = lookup(channel, root_id, "big_movie_copy.mkv")
@@ -104,7 +106,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       assert VFS.is_hardlink?(copy_node)
 
       # Verify both point to the same virtual inode
-      {:ok, original_node} = VFS.get_node(original_hardlink.id)
+      {:ok, original_node} = VFS.get_node(original_hardlink.inode_id)
       {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
 
       {:ok, original_inode_id} = VFS.extract_virtual_inode_id(original_node)
@@ -130,7 +132,12 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       copies =
         Enum.map(1..5, fn i ->
           {:ok, copy_resp} =
-            create_link(channel, original_hardlink.id, root_id, "series_episode_copy#{i}.mkv")
+            create_link(
+              channel,
+              original_hardlink.inode_id,
+              root_id,
+              "series_episode_copy#{i}.mkv"
+            )
 
           copy_resp.node
         end)
@@ -143,7 +150,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       end)
 
       # Verify all point to the same virtual inode
-      {:ok, original_node} = VFS.get_node(original_hardlink.id)
+      {:ok, original_node} = VFS.get_node(original_hardlink.inode_id)
       {:ok, original_inode_id} = VFS.extract_virtual_inode_id(original_node)
 
       Enum.each(copies, fn copy ->
@@ -166,7 +173,8 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
         create_streamable_file(root_id, "movie.mkv", 4_000_000_000)
 
       # Create a copy
-      {:ok, _copy_resp} = create_link(channel, original_hardlink.id, root_id, "movie_copy.mkv")
+      {:ok, _copy_resp} =
+        create_link(channel, original_hardlink.inode_id, root_id, "movie_copy.mkv")
 
       # Verify both exist and are streamable
       {:ok, original_lookup} = lookup(channel, root_id, "movie.mkv")
@@ -200,11 +208,11 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
         create_streamable_file(root_id, "video.mkv", 2_000_000_000)
 
       # Now we CAN create another hardlink to the virtual inode (by linking to the hardlink)
-      # This is the new behavior - it creates another hardlink to the same virtual inode
-      {:ok, copy_resp} = create_link(channel, original_hardlink.id, root_id, "video_copy.mkv")
+      {:ok, copy_resp} =
+        create_link(channel, original_hardlink.inode_id, root_id, "video_copy.mkv")
 
       # Verify both are streamable and point to same virtual inode
-      {:ok, original_node} = VFS.get_node(original_hardlink.id)
+      {:ok, original_node} = VFS.get_node(original_hardlink.inode_id)
       {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
 
       {:ok, original_inode_id} = VFS.extract_virtual_inode_id(original_node)
@@ -263,7 +271,8 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
         create_streamable_file(root_id, "original.mkv", 3_500_000_000)
 
       # Copy to the subdirectory
-      {:ok, copy_resp} = create_link(channel, original_hardlink.id, dir_id, "original_copy.mkv")
+      {:ok, copy_resp} =
+        create_link(channel, original_hardlink.inode_id, dir_id, "original_copy.mkv")
 
       # Verify the copy exists in the subdirectory
       {:ok, copy_lookup} = lookup(channel, dir_id, "original_copy.mkv")
@@ -271,7 +280,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       assert copy_lookup.node.id == copy_resp.node.id
 
       # Verify both point to same virtual inode
-      {:ok, original_node} = VFS.get_node(original_hardlink.id)
+      {:ok, original_node} = VFS.get_node(original_hardlink.inode_id)
       {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
 
       {:ok, original_inode_id} = VFS.extract_virtual_inode_id(original_node)
@@ -295,13 +304,19 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       assert VFS.count_hardlinks_to_virtual_inode(virtual_inode.id) == 1
 
       # Create 3 copies
-      {:ok, _copy1} = create_link(channel, original_hardlink.id, root_id, "tracked_copy1.mkv")
+      {:ok, _copy1} =
+        create_link(channel, original_hardlink.inode_id, root_id, "tracked_copy1.mkv")
+
       assert VFS.count_hardlinks_to_virtual_inode(virtual_inode.id) == 2
 
-      {:ok, _copy2} = create_link(channel, original_hardlink.id, root_id, "tracked_copy2.mkv")
+      {:ok, _copy2} =
+        create_link(channel, original_hardlink.inode_id, root_id, "tracked_copy2.mkv")
+
       assert VFS.count_hardlinks_to_virtual_inode(virtual_inode.id) == 3
 
-      {:ok, _copy3} = create_link(channel, original_hardlink.id, root_id, "tracked_copy3.mkv")
+      {:ok, _copy3} =
+        create_link(channel, original_hardlink.inode_id, root_id, "tracked_copy3.mkv")
+
       assert VFS.count_hardlinks_to_virtual_inode(virtual_inode.id) == 4
 
       # Delete one copy
@@ -341,7 +356,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
 
       # Try to create link with invalid name (path separator)
       assert {:error, %GRPC.RPCError{status: 3}} =
-               create_link(channel, original_hardlink.id, root_id, "path/to/file.mkv")
+               create_link(channel, original_hardlink.inode_id, root_id, "path/to/file.mkv")
     end
 
     test "cannot link with duplicate name", %{channel: channel} do
@@ -353,11 +368,12 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
         create_streamable_file(root_id, "duplicate.mkv", 1_000_000_000)
 
       # Create first copy
-      {:ok, _copy1} = create_link(channel, original_hardlink.id, root_id, "duplicate_copy.mkv")
+      {:ok, _copy1} =
+        create_link(channel, original_hardlink.inode_id, root_id, "duplicate_copy.mkv")
 
       # Try to create another copy with same name (should fail)
       assert {:error, %GRPC.RPCError{status: 3}} =
-               create_link(channel, original_hardlink.id, root_id, "duplicate_copy.mkv")
+               create_link(channel, original_hardlink.inode_id, root_id, "duplicate_copy.mkv")
     end
   end
 end

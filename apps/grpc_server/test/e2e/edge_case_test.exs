@@ -9,8 +9,9 @@ defmodule GrpcServer.E2E.EdgeCaseTest do
   require Logger
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+    :ok = GrpcTestHelper.cleanup_database()
+
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
     channel = connect()
 
