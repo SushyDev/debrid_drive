@@ -7,6 +7,7 @@ defmodule VFS do
   alias VFS.Repo
   alias VFS.Node
   alias VFS.FileMode
+  alias SyncEngine.Schemas.Torrent
 
   @doc """
   Gets the root node (where parent_id is nil).
@@ -108,33 +109,31 @@ defmodule VFS do
   end
 
   @doc """
-  Creates a hard link to an existing node.
+   Creates a hard link to an existing node.
 
-  The link appears as a regular file with the same mode and metadata as the target.
-  The target node ID is stored in the data field for resolution.
-  Uses a special content type to distinguish hard links from regular files.
+   The link appears as a regular file with the same mode and metadata as the target.
+   Sets the is_hardlink flag to true and stores the target node ID in hardlink_target_node_id.
 
   Note: This is not a true hard link (multiple directory entries to same inode),
   but provides equivalent semantics for read-only access.
   """
   def create_hardlink(parent_id, name, target_node_id) do
     with {:ok, target_node} <- get_node(target_node_id) do
-      case target_node do
-        %Node{content_type: "inode/hardlink"} ->
+      case is_hardlink?(target_node) do
+        true ->
           {:error, :cannot_link_to_hardlink}
 
-        # Create a node that looks identical to the target but with a special content type
-        %Node{} ->
+        false ->
+          # Create a node that looks identical to the target but stores a reference
           %Node{}
           |> Node.changeset(%{
             parent_id: parent_id,
             name: name,
-            # Same mode as target (no symlink bit!)
             mode: target_node.mode,
             data: to_string(target_node_id),
             size: target_node.size,
-            # Special content type to identify hard links
-            content_type: "inode/hardlink"
+            is_hardlink: true,
+            hardlink_target_node_id: target_node_id
           })
           |> Repo.insert()
       end
@@ -242,10 +241,13 @@ defmodule VFS do
   @doc """
   Removes a node by ID.
   This will cascade delete children if the database is configured for it.
+  Returns :ok on success or error tuple.
   """
   def remove_by_id(node_id, opts \\ []) do
     node = Repo.get!(Node, node_id)
-    do_remove(node, opts)
+    result = do_remove(node, opts)
+    # do_remove returns deleted struct on success or error tuple on failure
+    if is_struct(result), do: :ok, else: result
   end
 
   @doc """
@@ -253,8 +255,12 @@ defmodule VFS do
   """
   def remove_by_name(parent_id, name, opts \\ []) do
     case lookup(parent_id, name) do
-      {:ok, node} -> do_remove(node, opts)
-      error -> error
+      {:ok, node} ->
+        result = do_remove(node, opts)
+        if is_struct(result), do: :ok, else: result
+
+      error ->
+        error
     end
   end
 
@@ -264,26 +270,35 @@ defmodule VFS do
     cascade_hardlinks = Keyword.get(opts, :cascade_hardlinks, false)
 
     cond do
-      # Handle hard link with cascade_hardlinks
-      node.content_type == "inode/hardlink" and cascade_hardlinks ->
-        target_id = String.to_integer(node.data)
-        # Delete the target node (which will cascade to children if any)
-        case get_node(target_id) do
-          {:ok, target_node} ->
-            # Find all hard links pointing to this target
-            hardlinks = find_all_hardlinks_to_target(target_id)
-            # Delete all hard links (including this one)
-            Enum.each(hardlinks, fn link -> Repo.delete!(link) end)
-            # Then delete the target
-            Repo.delete!(target_node)
-
-          {:error, :not_found} ->
-            # Target already deleted, just delete this orphaned link
+      # Handle virtual inode hardlink with cascade_hardlinks
+      is_hardlink?(node) and cascade_hardlinks ->
+        case extract_virtual_inode_id(node) do
+          {:ok, _inode_id} ->
+            # Virtual inode hardlink - just delete this hardlink
+            # The actual virtual inode cleanup is handled by SyncEngine.Torrents
             Repo.delete!(node)
+
+          {:error, _} ->
+            # Regular POSIX hardlink - delete with target cascade
+            target_id = node.hardlink_target_node_id
+
+            case get_node(target_id) do
+              {:ok, target_node} ->
+                # Find all hard links pointing to this target
+                hardlinks = find_all_hardlinks_to_target(target_id)
+                # Delete all hard links (including this one)
+                Enum.each(hardlinks, fn link -> Repo.delete!(link) end)
+                # Then delete the target
+                Repo.delete!(target_node)
+
+              {:error, :not_found} ->
+                # Target already deleted, just delete this orphaned link
+                Repo.delete!(node)
+            end
         end
 
       # Handle regular hard link (just delete the link)
-      node.content_type == "inode/hardlink" ->
+      is_hardlink?(node) ->
         Repo.delete!(node)
 
       # Handle directory
@@ -306,6 +321,10 @@ defmodule VFS do
             delete_hardlinks_to_node(node.id)
           end
 
+          # Nullify any foreign key references from torrents to this directory
+          # This allows the directory deletion to proceed without constraint violations
+          nullify_torrent_node_references(node.id)
+
           Repo.delete!(node)
         end
 
@@ -326,16 +345,21 @@ defmodule VFS do
     Enum.each(hardlinks, fn link -> Repo.delete!(link) end)
   end
 
+  # Helper to nullify foreign key references from torrents to a node
+  # This prevents constraint violations when deleting a node that torrents reference
+  defp nullify_torrent_node_references(node_id) do
+    from(t in Torrent, where: t.node_id == ^node_id)
+    |> Repo.update_all(set: [node_id: nil])
+  end
+
   @doc """
   Counts the number of hard links pointing to a specific target node.
   Returns 0 if no hard links exist.
   """
   def count_hardlinks_to_target(target_node_id) do
-    target_id_str = to_string(target_node_id)
-
     Repo.one(
       from(n in Node,
-        where: n.content_type == "inode/hardlink" and n.data == ^target_id_str,
+        where: n.is_hardlink == true and n.hardlink_target_node_id == ^target_node_id,
         select: count(n.id)
       )
     ) || 0
@@ -346,18 +370,16 @@ defmodule VFS do
   Returns a list of nodes (may be empty).
   """
   def find_all_hardlinks_to_target(target_node_id) do
-    target_id_str = to_string(target_node_id)
-
     Repo.all(
       from(node in Node,
-        where: node.content_type == "inode/hardlink" and node.data == ^target_id_str,
+        where: node.is_hardlink == true and node.hardlink_target_node_id == ^target_node_id,
         order_by: node.name
       )
     )
   end
 
   @doc """
-  Updates the data and size of a node.
+   Updates the data and size of a node.
   """
   def write_data(node_id, data, offset \\ 0) do
     node = Repo.get!(Node, node_id)
@@ -426,4 +448,108 @@ defmodule VFS do
     |> Node.changeset(attrs)
     |> Repo.update()
   end
+
+  @doc """
+   Creates a hardlink to a virtual inode (torrent file).
+
+   Virtual inodes are backed by torrent_files records instead of regular VFS nodes.
+   The hardlink stores the torrent_file_id in hardlink_target_torrent_file_id field.
+
+  ## Parameters
+    - `parent_id`: Parent directory node ID
+    - `name`: Name of the hardlink
+    - `virtual_inode_id`: ID of the torrent_file (virtual inode)
+    - `opts`: Options including :size for file size
+
+  ## Returns
+    - `{:ok, node}` on success
+    - `{:error, reason}` on failure
+  """
+  def create_hardlink_to_virtual_inode(parent_id, name, virtual_inode_id, opts \\ []) do
+    size = Keyword.get(opts, :size, 0)
+    inode_ref = "vi:#{virtual_inode_id}"
+
+    %Node{}
+    |> Node.changeset(%{
+      parent_id: parent_id,
+      name: name,
+      mode: FileMode.file_mode(),
+      data: inode_ref,
+      size: size,
+      is_hardlink: true,
+      hardlink_target_torrent_file_id: virtual_inode_id
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Counts hardlinks pointing to a virtual inode.
+
+  Returns the number of nodes marked as hardlinks pointing to the given virtual inode.
+  """
+  def count_hardlinks_to_virtual_inode(virtual_inode_id) do
+    Repo.one(
+      from(n in Node,
+        where: n.is_hardlink == true and n.hardlink_target_torrent_file_id == ^virtual_inode_id,
+        select: count(n.id)
+      )
+    ) || 0
+  end
+
+  @doc """
+  Finds all hardlinks pointing to a virtual inode.
+
+  Returns a list of nodes that reference the given virtual inode.
+  """
+  def find_all_hardlinks_to_virtual_inode(virtual_inode_id) do
+    Repo.all(
+      from(node in Node,
+        where:
+          node.is_hardlink == true and node.hardlink_target_torrent_file_id == ^virtual_inode_id,
+        order_by: node.name
+      )
+    )
+  end
+
+  @doc """
+  Checks if a node is a hardlink.
+
+  A node is a hardlink if its is_hardlink flag is explicitly set to true.
+  Handles both boolean true and integer 1 (from legacy database).
+  This is POSIX-idiomatic and efficiently checks the explicit flag rather than parsing data.
+
+  Returns true if it's a hardlink, false otherwise.
+  """
+  def is_hardlink?(node) do
+    node.is_hardlink == true or node.is_hardlink == 1
+  end
+
+  @doc """
+  Extracts the virtual inode ID from a hardlink.
+
+  Returns:
+  - `{:ok, virtual_inode_id}` if it's a virtual inode hardlink
+  - `{:error, :not_virtual_inode}` if it's a regular POSIX hardlink
+  - `{:error, :not_a_hardlink}` if not a hardlink
+  """
+  def extract_virtual_inode_id(node) when is_map(node) do
+    # Note: is_hardlink can be 0/1 (from old DB as integer) or false/true (boolean)
+    is_hardlink_value = node.is_hardlink == true or node.is_hardlink == 1
+
+    cond do
+      # Not a hardlink at all
+      !is_hardlink_value ->
+        {:error, :not_a_hardlink}
+
+      # Virtual inode hardlink
+      node.hardlink_target_torrent_file_id ->
+        {:ok, node.hardlink_target_torrent_file_id}
+
+      # Regular POSIX hardlink
+      true ->
+        {:error, :not_virtual_inode}
+    end
+  end
+
+  def extract_virtual_inode_id(_), do: {:error, :not_a_hardlink}
 end

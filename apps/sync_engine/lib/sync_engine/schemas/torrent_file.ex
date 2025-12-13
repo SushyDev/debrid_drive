@@ -22,6 +22,11 @@ defmodule SyncEngine.Schemas.TorrentFile do
     field(:link_expires_at, :utc_datetime)
     field(:link_fetched_at, :utc_datetime)
 
+    # Virtual inode hardlink reference counting
+    # Tracks how many VFS hardlink nodes point to this virtual inode
+    # When count reaches 0, all user references are gone
+    field(:hardlink_count, :integer, default: 1)
+
     # Relationships
     belongs_to(:torrent, Torrent)
     belongs_to(:node, Node)
@@ -42,9 +47,11 @@ defmodule SyncEngine.Schemas.TorrentFile do
       :node_id,
       :download_link,
       :link_expires_at,
-      :link_fetched_at
+      :link_fetched_at,
+      :hardlink_count
     ])
-    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_id, :node_id])
+    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_id])
+    |> validate_number(:hardlink_count, greater_than_or_equal_to: 0)
     |> unique_constraint([:torrent_id, :rd_id])
     |> foreign_key_constraint(:torrent_id)
     |> foreign_key_constraint(:node_id)

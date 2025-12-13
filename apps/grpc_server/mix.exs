@@ -36,6 +36,7 @@ defmodule GrpcServer.MixProject do
       {:stream_mount_api,
        git: "https://github.com/sushydev/stream_mount_api", tag: "v1.3.2", subdir: "gen/elixir"},
       {:vfs, in_umbrella: true},
+      {:sync_engine, in_umbrella: true},
       {:stream_data, "~> 1.0", only: :test}
     ]
   end

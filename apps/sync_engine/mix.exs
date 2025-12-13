@@ -27,7 +27,8 @@ defmodule SyncEngine.MixProject do
   defp deps do
     [
       {:vfs, in_umbrella: true},
-      {:grpc_server, in_umbrella: true},
+      {:grpc, "~> 0.9"},
+      {:protobuf, "~> 0.13"},
       {:req, "~> 0.5.0"},
       {:floki, "~> 0.38.0"},
       {:real_debrid_ex, github: "sushydev/real_debrid_ex"}
