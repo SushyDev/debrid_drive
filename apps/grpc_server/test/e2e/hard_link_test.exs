@@ -324,15 +324,23 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, target_resp} = lookup(channel, root_id, "target.txt")
       target_id = target_resp.node.id
 
+      # Get initial nlink count
+      initial_nlink = target_resp.node.nlink
+
       # Create hard link in the directory
       {:ok, link_resp} = create_link(channel, target_id, dir_id, "link_to_target")
       link_inode_id = link_resp.node.id
 
-      # Both should point to the same inode
+      # Both should point to the same inode (POSIX hardlink semantics)
       assert link_inode_id == target_id
 
-      # Verify hard link exists
-      assert {:ok, _} = lookup(channel, dir_id, "link_to_target")
+      # Verify nlink count was incremented
+      assert link_resp.node.nlink == initial_nlink + 1
+
+      # Verify hard link exists via lookup and points to same inode
+      {:ok, lookup_resp} = lookup(channel, dir_id, "link_to_target")
+      assert lookup_resp.node.id == target_id
+      assert lookup_resp.node.nlink == initial_nlink + 1
 
       # Delete parent directory
       assert {:ok, _} = remove(channel, root_id, "parent_dir")

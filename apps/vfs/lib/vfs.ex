@@ -5,6 +5,7 @@ defmodule VFS do
   Uses the POSIX inode system with separate inodes and directory entries.
   """
 
+  require Logger
   import Ecto.Query, warn: false
   alias VFS.Repo
   alias VFS.Inode
@@ -53,26 +54,40 @@ defmodule VFS do
   @doc """
   Creates the root directory inode.
   Root always has inode_id=1.
+  Returns {:ok, inode} or {:error, reason}.
   """
   def create_root do
-    Repo.transaction(fn ->
-      # Create root inode
-      {:ok, inode} =
-        %Inode{}
-        |> Inode.changeset(%{
-          mode: FileMode.directory_mode(),
-          content_type: "inode/directory",
-          nlink: 1
-        })
-        |> Repo.insert()
+    # Explicitly insert root inode with inode_id=1
+    # We set inode_id directly to ensure it's 1, not relying on autoincrement
+    changeset =
+      %Inode{inode_id: 1}
+      |> Inode.changeset(%{
+        mode: FileMode.directory_mode(),
+        content_type: "inode/directory",
+        nlink: 1
+      })
 
-      # Ensure it got inode_id=1
-      if inode.inode_id != 1 do
-        Repo.rollback(:root_must_be_inode_1)
-      end
+    case Repo.insert(changeset) do
+      {:ok, inode} ->
+        # Successfully created root with inode_id=1
+        Logger.debug("Created root inode with inode_id=1")
+        {:ok, inode}
 
-      inode
-    end)
+      {:error, changeset} ->
+        # Insert failed - could be a race condition where another process created root
+        # Check if root now exists
+        case Repo.get(Inode, 1) do
+          nil ->
+            # Root still doesn't exist, this is a real error
+            Logger.error("Failed to create root inode: #{inspect(changeset)}")
+            {:error, changeset}
+
+          root ->
+            # Root exists now (created by another process), return it
+            Logger.debug("Root inode already exists (race condition), returning it")
+            {:ok, root}
+        end
+    end
   end
 
   @doc """
@@ -185,19 +200,44 @@ defmodule VFS do
            })
            |> Repo.insert() do
         {:ok, _entry} ->
+          # If this is a virtual inode, validate the external torrent_file exists first
+          # This prevents creating a directory entry to a broken virtual inode
+          if target_inode.virtual_inode_type == "torrent_file" do
+            case SyncEngine.Torrents.get_torrent_file_by_id(target_inode.virtual_inode_id) do
+              {:ok, _torrent_file} ->
+                :ok
+
+              error ->
+                Logger.error(
+                  "Cannot create hardlink: torrent_file #{target_inode.virtual_inode_id} not found"
+                )
+
+                Repo.rollback(error)
+            end
+          end
+
           # Increment nlink count
-          {:ok, _updated_inode} =
+          {:ok, updated_inode} =
             target_inode
             |> Inode.increment_nlink()
             |> Repo.update()
 
-          # If this is a virtual inode, also increment the external hardlink count
+          # If this is a virtual inode, increment the external hardlink count
+          # Note: This is done after nlink increment, but both are within a transaction
+          # so if the external increment fails, the entire transaction (including nlink) rolls back
           if target_inode.virtual_inode_type == "torrent_file" do
             case SyncEngine.Torrents.get_torrent_file_by_id(target_inode.virtual_inode_id) do
               {:ok, torrent_file} ->
                 case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
-                  {:ok, _} -> :ok
-                  error -> Repo.rollback(error)
+                  {:ok, _} ->
+                    :ok
+
+                  {:error, reason} = error ->
+                    Logger.error(
+                      "Failed to increment external hardlink count for torrent_file #{target_inode.virtual_inode_id}: #{inspect(reason)}"
+                    )
+
+                    Repo.rollback(error)
                 end
 
               error ->
@@ -205,7 +245,7 @@ defmodule VFS do
             end
           end
 
-          target_inode
+          updated_inode
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -250,13 +290,26 @@ defmodule VFS do
 
   @doc """
   Gets an inode by ID.
+
+  Note: This function is also available as `get_node/1` for backward compatibility,
+  but "node" is legacy terminology from the old schema. Use `get_inode/1` in new code.
+
+  Returns `{:ok, inode}` or `{:error, :not_found}`.
   """
-  def get_node(inode_id) do
+  def get_inode(inode_id) do
     case Repo.get(Inode, inode_id) do
       nil -> {:error, :not_found}
       inode -> {:ok, inode}
     end
   end
+
+  @doc """
+  Gets an inode by ID (legacy name).
+
+  **Deprecated**: Use `get_inode/1` instead. This function exists for backward
+  compatibility but "node" refers to the old schema terminology.
+  """
+  def get_node(inode_id), do: get_inode(inode_id)
 
   @doc """
   Gets an inode by ID, raises if not found.
@@ -389,8 +442,15 @@ defmodule VFS do
           {:ok, torrent_file} ->
             SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
 
-          _ ->
-            :ok
+          {:error, :not_found} ->
+            Logger.warning(
+              "Torrent file #{inode.virtual_inode_id} not found when removing last hardlink to inode #{inode.inode_id}"
+            )
+
+          {:error, reason} ->
+            Logger.warning(
+              "Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}"
+            )
         end
       end
 
@@ -407,8 +467,15 @@ defmodule VFS do
           {:ok, torrent_file} ->
             SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
 
-          _ ->
-            :ok
+          {:error, :not_found} ->
+            Logger.warning(
+              "Torrent file #{inode.virtual_inode_id} not found when removing hardlink to inode #{inode.inode_id}"
+            )
+
+          {:error, reason} ->
+            Logger.warning(
+              "Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}"
+            )
         end
       end
     end
@@ -552,6 +619,8 @@ defmodule VFS do
 
     Repo.transaction(fn ->
       # Check if virtual inode already exists
+      # Note: SQLite doesn't support row-level locking (FOR UPDATE), so we rely on
+      # the unique constraint to handle concurrent creation attempts gracefully
       existing_inode =
         Repo.one(
           from(i in Inode,
@@ -565,30 +634,118 @@ defmodule VFS do
         case existing_inode do
           nil ->
             # Create new virtual inode
-            {:ok, new_inode} =
-              %Inode{}
-              |> Inode.changeset(%{
-                mode: FileMode.file_mode(),
-                size: size,
-                nlink: 1,
-                virtual_inode_type: "torrent_file",
-                virtual_inode_id: virtual_inode_id
-              })
-              |> Repo.insert()
+            # Note: The unique constraint will still catch any race condition,
+            # but we handle it gracefully by retrying the lookup
+            case %Inode{}
+                 |> Inode.changeset(%{
+                   mode: FileMode.file_mode(),
+                   size: size,
+                   nlink: 1,
+                   virtual_inode_type: "torrent_file",
+                   virtual_inode_id: virtual_inode_id
+                 })
+                 |> Repo.insert() do
+              {:ok, new_inode} ->
+                Logger.debug(
+                  "Created new virtual inode #{new_inode.inode_id} for torrent_file #{virtual_inode_id}"
+                )
 
-            # Increment the external hardlink count on the torrent_file
-            case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
-              {:ok, torrent_file} ->
-                case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
-                  {:ok, _} -> :ok
-                  error -> Repo.rollback(error)
+                # Increment the external hardlink count on the torrent_file
+                case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+                  {:ok, torrent_file} ->
+                    case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
+                      {:ok, _} ->
+                        :ok
+
+                      {:error, reason} = error ->
+                        Logger.error(
+                          "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
+                        )
+
+                        Repo.rollback(error)
+                    end
+
+                  {:error, reason} = error ->
+                    Logger.error(
+                      "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
+                    )
+
+                    Repo.rollback(error)
                 end
 
-              error ->
-                Repo.rollback(error)
-            end
+                new_inode
 
-            new_inode
+              {:error, %{errors: errors} = changeset} ->
+                # Check if this is a unique constraint violation
+                if Keyword.has_key?(errors, :virtual_inode_id) or
+                     Keyword.has_key?(errors, :virtual_inode_type) do
+                  # Race condition occurred - another transaction created the inode
+                  # Retry the lookup (without lock since SQLite doesn't support FOR UPDATE)
+                  Logger.debug(
+                    "Detected concurrent creation of virtual inode for torrent_file #{virtual_inode_id}, retrying lookup"
+                  )
+
+                  case Repo.one(
+                         from(i in Inode,
+                           where:
+                             i.virtual_inode_type == "torrent_file" and
+                               i.virtual_inode_id == ^virtual_inode_id,
+                           limit: 1
+                         )
+                       ) do
+                    nil ->
+                      # Still doesn't exist - this shouldn't happen
+                      Logger.error(
+                        "Virtual inode still not found after constraint violation for torrent_file #{virtual_inode_id}"
+                      )
+
+                      Repo.rollback({:error, :virtual_inode_not_found_after_conflict})
+
+                    found_inode ->
+                      # Found it - increment nlink
+                      {:ok, updated} =
+                        found_inode
+                        |> Inode.increment_nlink()
+                        |> Repo.update()
+
+                      Logger.debug(
+                        "Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id} (after race condition resolution)"
+                      )
+
+                      # Also increment the external hardlink count on the torrent_file
+                      case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
+                        {:ok, torrent_file} ->
+                          case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
+                            {:ok, _} ->
+                              :ok
+
+                            {:error, reason} = error ->
+                              Logger.error(
+                                "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
+                              )
+
+                              Repo.rollback(error)
+                          end
+
+                        {:error, reason} = error ->
+                          Logger.error(
+                            "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
+                          )
+
+                          Repo.rollback(error)
+                      end
+
+                      updated
+                  end
+                else
+                  # Some other error
+                  Logger.error(
+                    "Failed to create virtual inode for torrent_file #{virtual_inode_id}: #{inspect(changeset)}"
+                  )
+
+                  Repo.rollback({:error, changeset})
+                end
+            end
 
           inode ->
             # Increment nlink on existing virtual inode
@@ -597,15 +754,30 @@ defmodule VFS do
               |> Inode.increment_nlink()
               |> Repo.update()
 
+            Logger.debug(
+              "Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id}"
+            )
+
             # Also increment the external hardlink count on the torrent_file
             case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
               {:ok, torrent_file} ->
                 case SyncEngine.Torrents.increment_hardlink_count(torrent_file) do
-                  {:ok, _} -> :ok
-                  error -> Repo.rollback(error)
+                  {:ok, _} ->
+                    :ok
+
+                  {:error, reason} = error ->
+                    Logger.error(
+                      "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
+                    )
+
+                    Repo.rollback(error)
                 end
 
-              error ->
+              {:error, reason} = error ->
+                Logger.error(
+                  "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
+                )
+
                 Repo.rollback(error)
             end
 
@@ -668,13 +840,35 @@ defmodule VFS do
   end
 
   @doc """
-  Checks if an inode is a virtual inode.
-  Returns true if it has virtual_inode_type and virtual_inode_id.
+  @doc \"""
+  Checks if an inode is a virtual inode (backed by external storage like RealDebrid).
+
+  Virtual inodes are identified by having both `virtual_inode_type` and `virtual_inode_id` set.
+  These represent streamable files that don't store data in the database.
+
+  Returns `true` if it's a virtual inode, `false` otherwise.
   """
-  def is_hardlink?(inode) do
-    # In the new schema, all files with nlink > 1 are hardlinks
-    # But we keep this for compatibility - virtual inodes are identified by virtual_inode_type
+  def is_virtual_inode?(inode) do
     not is_nil(inode.virtual_inode_type) && not is_nil(inode.virtual_inode_id)
+  end
+
+  @doc """
+  Checks if an inode is a virtual inode (legacy name).
+
+  **Deprecated**: Use `is_virtual_inode?/1` instead. The name `is_hardlink?` is
+  misleading because in POSIX terms, a "hardlink" is any directory entry pointing
+  to an inode, and an inode can have multiple hardlinks (nlink > 1). This function
+  specifically checks for virtual inodes (streamable files from RealDebrid).
+  """
+  def is_hardlink?(inode), do: is_virtual_inode?(inode)
+
+  @doc """
+  Checks if an inode has multiple hardlinks (POSIX semantics).
+
+  Returns `true` if the inode has more than one directory entry pointing to it (nlink > 1).
+  """
+  def has_hardlinks?(inode) do
+    inode.nlink > 1
   end
 
   @doc """

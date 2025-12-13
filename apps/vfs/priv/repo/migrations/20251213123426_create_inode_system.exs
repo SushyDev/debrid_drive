@@ -98,6 +98,9 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
     WHERE node_id IS NOT NULL
     """)
 
+    # Clean up temporary tables now that foreign keys are migrated
+    execute(&cleanup_migration_data/0)
+
     # Drop old node_id columns after migration
     alter table(:torrents) do
       remove(:node_id)
@@ -112,10 +115,18 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
     create(index(:torrent_files, [:inode_id]))
 
     # ============================================================================
-    # PHASE 4: Drop old nodes table (optional - keep for safety initially)
+    # PHASE 4: Drop old nodes table (SAFETY: Keep commented out initially)
     # ============================================================================
 
-    # Uncomment when confident migration succeeded:
+    # SAFETY CHECKLIST - Only uncomment the drop statement below after ALL of:
+    #   1. Migration has run successfully in production for at least 30 days
+    #   2. All application code verified to no longer reference :nodes table
+    #   3. Verified backups of :nodes table data exist and are restorable
+    #   4. Database query logs confirm no queries against :nodes table
+    #   5. Team has reviewed and approved the permanent removal
+    #   6. Rollback plan documented in case of issues
+    #
+    # When ready to drop:
     # drop table(:nodes)
   end
 
@@ -449,7 +460,7 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
             FROM inodes i
             LEFT JOIN directory_entries de ON de.inode_id = i.inode_id
             WHERE i.inode_id != 1
-            GROUP BY i.inode_id
+            GROUP BY i.inode_id, i.nlink
             HAVING i.nlink != COUNT(de.id)
             """,
             []
@@ -460,8 +471,19 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
         else
           IO.puts("  - nlink counts verified: OK")
         end
+
+        # NOTE: We do NOT drop the temp tables here because they're needed for
+        # the foreign key migration that happens after columns are added in up/0.
+        # Temp tables will be dropped explicitly in cleanup_migration_data/0.
       end,
       timeout: :infinity
     )
+  end
+
+  defp cleanup_migration_data do
+    # Drop temporary tables used during migration
+    VFS.Repo.query!("DROP TABLE IF EXISTS node_to_inode_map", [])
+    VFS.Repo.query!("DROP TABLE IF EXISTS virtual_inode_map", [])
+    VFS.Repo.query!("DROP TABLE IF EXISTS broken_posix_hardlinks", [])
   end
 end

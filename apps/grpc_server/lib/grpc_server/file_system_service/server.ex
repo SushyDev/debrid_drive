@@ -355,6 +355,7 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   # Helper to get any name for an inode (for cases where we don't have the directory entry context)
+  # Returns a name if found, or "(deleted)" if the inode has no directory entries
   defp get_any_name_for_inode(inode_id) do
     case VFS.Repo.one(
            from(de in VFS.DirectoryEntry,
@@ -363,7 +364,7 @@ defmodule GrpcServer.FileSystemService.Server do
              select: de.name
            )
          ) do
-      nil -> "unknown"
+      nil -> "(deleted)"
       name -> name
     end
   end
@@ -376,7 +377,7 @@ defmodule GrpcServer.FileSystemService.Server do
     # Convert 0 size to nil (read all)
     read_size = if size == 0, do: nil, else: size
 
-    # Resolve hard links to their target
+    # Validate the inode is suitable for read operations (not a virtual inode)
     case resolve_for_file_ops(node_id) do
       {:ok, target_id} ->
         # Regular file: read from database
@@ -394,6 +395,11 @@ defmodule GrpcServer.FileSystemService.Server do
       {:error, :not_found} ->
         raise GRPC.RPCError, status: :not_found, message: "Node not found"
 
+      {:error, :virtual_inode_not_writable} ->
+        raise GRPC.RPCError,
+          status: :failed_precondition,
+          message: "Cannot read virtual inode data directly (use get_stream_url for streaming)"
+
       {:error, _reason} ->
         raise GRPC.RPCError, status: :internal, message: "Read operation failed"
     end
@@ -404,13 +410,18 @@ defmodule GrpcServer.FileSystemService.Server do
   """
   @spec write_file(WriteFileRequest.t(), GRPC.Server.Stream.t()) :: WriteFileResponse.t()
   def write_file(%WriteFileRequest{node_id: node_id, offset: offset, data: data}, _stream) do
-    # Resolve hard links to their target
+    # Validate the inode is suitable for write operations (not a virtual inode)
     with {:ok, target_id} <- resolve_for_file_ops(node_id),
          {:ok, _node} <- VFS.write_data(target_id, data, offset) do
       %WriteFileResponse{bytes_written: byte_size(data)}
     else
       {:error, :not_found} ->
         raise GRPC.RPCError, status: :not_found, message: "Node not found"
+
+      {:error, :virtual_inode_not_writable} ->
+        raise GRPC.RPCError,
+          status: :failed_precondition,
+          message: "Cannot write to virtual inode (streamable file)"
 
       {:error, _reason} ->
         raise GRPC.RPCError, status: :internal, message: "Write operation failed"
@@ -535,10 +546,22 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   # Resolves an inode for file operations (read, write, etc.)
-  # Virtual inodes don't need resolution, they're already the target
-  # Returns the inode_id
+  # Validates that an inode is suitable for file read/write operations
+  # Virtual inodes (streamable files) cannot be written to, only read via streaming
+  # Returns {:ok, inode_id} if suitable for file ops, or {:error, reason} if not
   defp resolve_for_file_ops(inode_id) do
-    {:ok, inode_id}
+    case VFS.get_node(inode_id) do
+      {:ok, inode} ->
+        if inode.virtual_inode_type do
+          # Virtual inodes represent remote content and cannot be written to
+          {:error, :virtual_inode_not_writable}
+        else
+          {:ok, inode_id}
+        end
+
+      error ->
+        error
+    end
   end
 
   # Resolves an inode to its torrent file for streaming

@@ -68,11 +68,12 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       })
 
     # Create the first hardlink to the virtual inode
+    # Note: create_hardlink_to_virtual_inode automatically increments the hardlink count
     {:ok, hardlink} =
       VFS.create_hardlink_to_virtual_inode(root_id, filename, torrent_file.id, size: size)
 
-    # Increment hardlink count
-    {:ok, updated_torrent_file} = SyncEngine.Torrents.increment_hardlink_count(torrent_file)
+    # Reload the torrent_file to get the updated hardlink_count
+    {:ok, updated_torrent_file} = SyncEngine.Torrents.get_torrent_file_by_id(torrent_file.id)
 
     {hardlink, updated_torrent_file}
   end
@@ -101,11 +102,14 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       assert copy_lookup_resp.node.streamable == true
       assert copy_lookup_resp.node.size == 5_000_000_000
 
-      # Verify the copy is actually a hardlink by checking the VFS node
+      # Verify both the original and copy point to the same inode (POSIX hardlink semantics)
+      assert copy_resp.node.id == original_hardlink.inode_id
+
+      # Verify the inode is a virtual inode (streamable)
       {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
       assert VFS.is_hardlink?(copy_node)
 
-      # Verify both point to the same virtual inode
+      # Verify both point to the same virtual inode (torrent_file)
       {:ok, original_node} = VFS.get_node(original_hardlink.inode_id)
       {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
 
@@ -115,7 +119,10 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
       assert original_inode_id == copy_inode_id
       assert original_inode_id == virtual_inode.id
 
-      # Verify hardlink count increased
+      # Verify nlink count on the inode is 2 (original + copy)
+      assert copy_node.nlink == 2
+
+      # Verify external hardlink count on torrent_file increased
       hardlink_count = VFS.count_hardlinks_to_virtual_inode(virtual_inode.id)
       assert hardlink_count == 2
     end
