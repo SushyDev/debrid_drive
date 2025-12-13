@@ -28,13 +28,14 @@ defmodule SyncEngine.DeletionTest do
     # Clean databases
     VFS.Repo.delete_all(TorrentFile)
     VFS.Repo.delete_all(Torrent)
-    VFS.Repo.delete_all(VFS.Node)
+    VFS.Repo.delete_all(VFS.DirectoryEntry)
+    VFS.Repo.delete_all(VFS.Inode)
 
     # Re-enable foreign key constraints
     Ecto.Adapters.SQL.query!(VFS.Repo, "PRAGMA foreign_keys = ON", [])
 
     # Create VFS root
-    {:ok, root} = VFS.create_directory(nil, "/", mode: VFS.FileMode.directory_mode(0o755))
+    {:ok, root} = VFS.get_root()
 
     %{root: root}
   end
@@ -49,16 +50,16 @@ defmodule SyncEngine.DeletionTest do
     deletion_status = Keyword.get(opts, :deletion_status)
 
     # Create VFS directory for torrent
-    {:ok, torrent_dir} = VFS.create_directory(root.id, "torrent_#{rd_id}")
+    {:ok, torrent_dir} = VFS.create_directory(root.inode_id, "torrent_#{rd_id}")
 
-    # Create torrent record with node_id
+    # Create torrent record with inode_id
     torrent_attrs = %{
       rd_id: rd_id,
       hash: hash,
       filename: filename,
       bytes: bytes,
       status: status,
-      node_id: torrent_dir.id
+      inode_id: torrent_dir.inode_id
     }
 
     torrent_attrs =
@@ -83,7 +84,7 @@ defmodule SyncEngine.DeletionTest do
 
     # Create hardlink to the virtual inode in the torrent directory
     {:ok, hardlink_node} =
-      VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "movie.mkv", torrent_file.id)
+      VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "movie.mkv", torrent_file.id)
 
     {torrent, torrent_dir, hardlink_node, torrent_file}
   end
@@ -109,7 +110,6 @@ defmodule SyncEngine.DeletionTest do
       assert :ok = SyncEngine.Torrents.queue_deletion(torrent.id)
 
       # Verify Oban job was enqueued
-      # Note: Requires Oban.Testing or similar
       # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{torrent_id: torrent.id}
     end
   end
@@ -130,7 +130,7 @@ defmodule SyncEngine.DeletionTest do
         })
 
       {:ok, hardlink_node2} =
-        VFS.create_hardlink_to_virtual_inode(torrent_dir.id, "file2.mkv", torrent_file2.id)
+        VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "file2.mkv", torrent_file2.id)
 
       # Reload to get the actual torrent_files
       torrent = Repo.preload(torrent, :files, force: true)
@@ -141,9 +141,9 @@ defmodule SyncEngine.DeletionTest do
       assert :ok = SyncEngine.Torrents.cleanup_after_deletion(torrent.id)
 
       # Verify hardlink VFS nodes are removed
-      assert {:error, :not_found} = VFS.get_node(hardlink_node.id)
-      assert {:error, :not_found} = VFS.get_node(hardlink_node2.id)
-      assert {:error, :not_found} = VFS.get_node(torrent_dir.id)
+      assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
+      assert {:error, :not_found} = VFS.get_node(hardlink_node2.inode_id)
+      assert {:error, :not_found} = VFS.get_node(torrent_dir.inode_id)
 
       # Verify torrent_files are removed
       assert Repo.all(from(tf in TorrentFile, where: tf.torrent_id == ^torrent.id)) == []
@@ -159,8 +159,8 @@ defmodule SyncEngine.DeletionTest do
       # Do NOT clean up if deletion failed
       # VFS nodes should remain
 
-      assert {:ok, _} = VFS.get_node(hardlink_node.id)
-      assert {:ok, _} = VFS.get_node(torrent_dir.id)
+      assert {:ok, _} = VFS.get_node(hardlink_node.inode_id)
+      assert {:ok, _} = VFS.get_node(torrent_dir.inode_id)
     end
   end
 
@@ -180,7 +180,7 @@ defmodule SyncEngine.DeletionTest do
       assert {:ok, 1} = SyncEngine.Services.TorrentSync.reconcile_deletions(api_torrent_ids)
 
       # VFS should be cleaned up
-      assert {:error, :not_found} = VFS.get_node(hardlink_node.id)
+      assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
       assert Repo.get(Torrent, torrent.id) == nil
     end
 
@@ -202,7 +202,6 @@ defmodule SyncEngine.DeletionTest do
 
       # Sync should retry deletion
       # This test requires proper mocking of RealDebrid API calls
-      # TODO: Implement proper mocking for RealDebrid API calls in tests using Mox
       result = SyncEngine.Services.TorrentSync.retry_failed_deletions(client)
       assert {:ok, _} = result
     end
@@ -240,21 +239,21 @@ defmodule SyncEngine.DeletionTest do
 
       # Create another hardlink to the same virtual inode outside torrent directory
       {:ok, external_hardlink} =
-        VFS.create_hardlink_to_virtual_inode(root.id, "favorite.mkv", torrent_file.id)
+        VFS.create_hardlink_to_virtual_inode(root.inode_id, "favorite.mkv", torrent_file.id)
 
       # Verify both hardlinks are streamable before deletion
-      {:ok, node1} = VFS.get_node(hardlink_node.id)
+      {:ok, node1} = VFS.get_node(hardlink_node.inode_id)
       assert VFS.is_hardlink?(node1)
-      {:ok, node2} = VFS.get_node(external_hardlink.id)
+      {:ok, node2} = VFS.get_node(external_hardlink.inode_id)
       assert VFS.is_hardlink?(node2)
 
       # Delete the virtual inode
       {:ok, _} = Repo.delete(torrent_file)
 
       # Both hardlinks should still exist but are now broken
-      {:ok, broken_link1} = VFS.get_node(hardlink_node.id)
+      {:ok, broken_link1} = VFS.get_node(hardlink_node.inode_id)
       assert VFS.is_hardlink?(broken_link1)
-      {:ok, broken_link2} = VFS.get_node(external_hardlink.id)
+      {:ok, broken_link2} = VFS.get_node(external_hardlink.inode_id)
       assert VFS.is_hardlink?(broken_link2)
 
       # But they point to non-existent virtual inode
@@ -275,15 +274,15 @@ defmodule SyncEngine.DeletionTest do
 
       # Create external hardlink to the same virtual inode
       {:ok, external_hardlink} =
-        VFS.create_hardlink_to_virtual_inode(root.id, "favorite.mkv", torrent_file.id)
+        VFS.create_hardlink_to_virtual_inode(root.inode_id, "favorite.mkv", torrent_file.id)
 
       # Clean up after deletion
       # This should delete all hardlinks pointing to torrent files
       assert :ok = SyncEngine.Torrents.cleanup_after_deletion(torrent.id)
 
       # All hardlinks should be deleted
-      assert {:error, :not_found} = VFS.get_node(hardlink_node.id)
-      assert {:error, :not_found} = VFS.get_node(external_hardlink.id)
+      assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
+      assert {:error, :not_found} = VFS.get_node(external_hardlink.inode_id)
 
       # Torrent should be deleted
       assert {:error, :not_found} = SyncEngine.Torrents.get_torrent(torrent.id)
@@ -315,7 +314,6 @@ defmodule SyncEngine.DeletionTest do
       end
 
       # Clear the queue to avoid API calls in tests
-      # Note: JobQueue is disabled in test environment
       # SyncEngine.JobQueue.clear()
 
       # Manually cleanup (simulating successful API deletion)

@@ -10,8 +10,8 @@ defmodule SyncEngine.TorrentFileTest do
     Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 
     {:ok, root} = VFS.get_root()
-    {:ok, test_dir} = VFS.create_directory(root.id, "test")
-    {:ok, torrent_node} = VFS.create_directory(test_dir.id, "torrent")
+    {:ok, test_dir} = VFS.create_directory(root.inode_id, "test")
+    {:ok, torrent_node} = VFS.create_directory(test_dir.inode_id, "torrent")
 
     {:ok, torrent} =
       Torrents.create_torrent(%{
@@ -19,10 +19,10 @@ defmodule SyncEngine.TorrentFileTest do
         filename: "Test",
         hash: "hash",
         bytes: 1000,
-        node_id: torrent_node.id
+        inode_id: torrent_node.inode_id
       })
 
-    {:ok, file_node} = VFS.create_file(torrent_node.id, "file.mp4", size: 500)
+    {:ok, file_node} = VFS.create_file(torrent_node.inode_id, "file.mp4", size: 500)
 
     {:ok, torrent: torrent, file_node: file_node}
   end
@@ -71,7 +71,7 @@ defmodule SyncEngine.TorrentFileTest do
           bytes: 500,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       link = "https://download.example.com/file.mp4"
@@ -96,7 +96,7 @@ defmodule SyncEngine.TorrentFileTest do
           bytes: 500,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       link = "https://download.example.com/cached.mp4"

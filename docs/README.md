@@ -115,7 +115,8 @@ Debrid Drive Ex is an **Elixir Umbrella application** with three isolated apps:
          │             VFS Layer                  │
          │  ┌──────────────────────────────────┐ │
          │  │   SQLite Database (WAL mode)     │ │
-         │  │   - nodes (filesystem tree)       │ │
+         │  │   - inodes (file metadata)        │ │
+         │  │   - directory_entries (names)     │ │
          │  │   - torrents (metadata)           │ │
          │  │   - torrent_files (with links)    │ │
          │  └──────────────────────────────────┘ │
@@ -136,8 +137,9 @@ Debrid Drive Ex is an **Elixir Umbrella application** with three isolated apps:
 ### Key Components
 
 #### 1. **VFS (Virtual Filesystem)** - `apps/vfs`
-- SQLite-backed filesystem with self-referential tree structure
+- SQLite-backed POSIX-compliant filesystem with inode system
 - Unix-style file modes (directories, files, symlinks, hard links)
+- Separates inodes (metadata) from directory entries (names)
 - Full CRUD operations with transactional guarantees
 - Optimized with WAL mode, 64MB cache, 30s busy timeout
 
@@ -272,7 +274,7 @@ config :sync_engine,
   sync_limit: 100
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for complete details.
+See [Configuration Guide](CONFIGURATION.md) for complete details.
 
 ---
 
@@ -412,18 +414,14 @@ client = SyncEngine.RealDebridClient.get_client()
 SyncEngine.Services.TorrentSync.sync(client, torrents_root_id: root.id)
 ```
 
-See [Configuration Guide](docs/CONFIGURATION.md) for more troubleshooting.
+See [Configuration Guide](CONFIGURATION.md) for more troubleshooting.
 
 ---
 
 ## Documentation
 
-- **[Architecture Overview](docs/ARCHITECTURE.md)** - Technical deep dive
-- **[Configuration Guide](docs/CONFIGURATION.md)** - Setup and config
-- **[Production Readiness](PRODUCTION_READINESS.md)** - Production checklist
-- **[Deletion Spec](specs/DELETION_SPEC.md)** - Deletion system design
-- **[Project Instructions](PROJECT_INSTRUCTIONS.md)** - Original design doc
-- **[Code Issues](CODE_ISSUES_AND_SOLUTIONS.md)** - Known issues
+- **[Architecture Overview](ARCHITECTURE.md)** - Technical deep dive
+- **[Configuration Guide](CONFIGURATION.md)** - Setup and config
 
 ---
 
@@ -463,7 +461,7 @@ debrid_drive_ex/
 
 ## License
 
-[LICENSE.md](docs/LICENSE.md)
+[LICENSE.md](LICENSE.md)
 
 ---
 

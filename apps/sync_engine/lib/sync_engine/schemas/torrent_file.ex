@@ -29,7 +29,8 @@ defmodule SyncEngine.Schemas.TorrentFile do
 
     # Relationships
     belongs_to(:torrent, Torrent)
-    belongs_to(:node, Node)
+    # Reference to the inode representing this file in VFS
+    field(:inode_id, :integer)
 
     timestamps()
   end
@@ -44,7 +45,7 @@ defmodule SyncEngine.Schemas.TorrentFile do
       :selected,
       :link,
       :torrent_id,
-      :node_id,
+      :inode_id,
       :download_link,
       :link_expires_at,
       :link_fetched_at,
@@ -54,7 +55,7 @@ defmodule SyncEngine.Schemas.TorrentFile do
     |> validate_number(:hardlink_count, greater_than_or_equal_to: 0)
     |> unique_constraint([:torrent_id, :rd_id])
     |> foreign_key_constraint(:torrent_id)
-    |> foreign_key_constraint(:node_id)
+    |> foreign_key_constraint(:inode_id)
   end
 
   @doc """

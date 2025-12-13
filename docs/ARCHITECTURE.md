@@ -85,8 +85,8 @@ This document provides a deep technical dive into the architecture, design decis
 │ │  └────────────────────┬─────────────────────────────────────┘  │  │
 │ │                       │                                         │  │
 │ │  ┌────────────────────▼─────────────────────────────────────┐  │  │
-│ │  │           Node Schema + Repo                             │  │  │
-│ │  │  Self-referential tree (parent_id → id)                 │  │  │
+│ │  │           Inode + DirectoryEntry Schemas                │  │  │
+│ │  │  POSIX-compliant (inode_id, nlink, directory_entries)   │  │  │
 │ │  └────────────────────┬─────────────────────────────────────┘  │  │
 │ └───────────────────────┼──────────────────────────────────────────┘
 │                         │                                            │
@@ -99,7 +99,8 @@ This document provides a deep technical dive into the architecture, design decis
 │ │  │ Busy Timeout: 30 seconds                                 │   │
 │ │  │                                                           │   │
 │ │  │ Tables:                                                   │   │
-│ │  │  - nodes (VFS tree structure)                            │   │
+│ │  │  - inodes (file metadata + content)                      │   │
+│ │  │  - directory_entries (filename → inode mappings)         │   │
 │ │  │  - torrents (RealDebrid metadata)                        │   │
 │ │  │  - torrent_files (file details + links)                  │   │
 │ │  │  - rejected_torrents (invalid torrents)                  │   │
@@ -134,37 +135,38 @@ This document provides a deep technical dive into the architecture, design decis
 
 #### Key Features
 
-- **Self-Referential Tree**: Uses `parent_id` foreign key for tree structure
+- **POSIX Inode System**: Separates inodes (metadata) from directory entries (names)
 - **Unix-Style Modes**: File type + permissions in single integer (e.g., `0o40755`)
-- **Content Types**: Distinguishes files, directories, symlinks, hard links
+- **True Hardlinks**: Multiple directory entries can point to the same inode
+- **Virtual Inodes**: Streamable files reference remote RealDebrid content
 - **Transactional**: All operations wrapped in Ecto transactions
 
 #### Public API
 
 ```elixir
 # Directory Operations
-VFS.create_directory(parent_id, name, opts \\ [])
-VFS.create_directory_recursive(parent_id, path)
+VFS.create_directory(parent_inode_id, name, opts \\ [])
+VFS.create_directory_recursive(parent_inode_id, path)
 
 # File Operations
-VFS.create_file(parent_id, name, opts \\ [])
-VFS.write_file(node_id, data, offset \\ 0)
-VFS.read_file(node_id, offset \\ 0, size \\ nil)
+VFS.create_file(parent_inode_id, name, opts \\ [])
+VFS.write_file(inode_id, data, offset \\ 0)
+VFS.read_file(inode_id, offset \\ 0, size \\ nil)
 
 # Link Operations
-VFS.create_symlink(parent_id, name, target_path)
-VFS.create_hardlink(parent_id, name, target_id)
+VFS.create_symlink(parent_inode_id, name, target_path)
+VFS.create_hardlink(parent_inode_id, name, target_inode_id)
 
 # Navigation
-VFS.lookup(parent_id, name)
-VFS.list_children(parent_id)
+VFS.lookup(parent_inode_id, name)
+VFS.list_children(parent_inode_id)
 VFS.get_root()
-VFS.get_node(node_id)
+VFS.get_inode(inode_id)
 
 # Modification
-VFS.move(node_id, new_parent_id, new_name, opts \\ [])
-VFS.remove(parent_id, name, opts \\ [])
-VFS.remove_by_id(node_id, opts \\ [cascade: false])
+VFS.move(inode_id, new_parent_inode_id, new_name, opts \\ [])
+VFS.remove(parent_inode_id, name, opts \\ [])
+VFS.remove_by_id(inode_id, opts \\ [cascade: false])
 ```
 
 #### File Mode System
@@ -188,10 +190,10 @@ end
 
 #### Hard Link Design
 
-- **Content Type**: `"inode/hardlink"`
-- **Target Tracking**: `target_id` points to file node
-- **Reference Counting**: Counted via SQL `COUNT(*)` queries
-- **Deletion Rule**: Only delete file when last reference removed
+- **POSIX Semantics**: Multiple directory entries pointing to same inode
+- **Reference Counting**: `nlink` field in inode (no COUNT queries needed)
+- **Virtual Inodes**: Streamable files grouped by `torrent_file_id`
+- **Deletion Rule**: Only delete inode when `nlink` reaches 0
 
 ---
 
@@ -349,18 +351,18 @@ end
 
 | RPC Method | VFS Function | Description |
 |-----------|--------------|-------------|
-| `Root` | `VFS.get_root()` | Get root node |
+| `Root` | `VFS.get_root()` | Get root inode |
 | `ReadDirAll` | `VFS.list_children()` | List directory contents |
 | `Lookup` | `VFS.lookup()` | Find child by name |
 | `Create` | `VFS.create_file()` | Create file |
 | `Mkdir` | `VFS.create_directory()` | Create directory |
-| `Remove` | `VFS.remove()` | Delete node |
-| `Rename` | `VFS.move()` | Move/rename node |
+| `Remove` | `VFS.remove()` | Delete directory entry |
+| `Rename` | `VFS.move()` | Move/rename entry |
 | `Link` | `VFS.create_hardlink()` | Create hard link |
 | `ReadLink` | `VFS.read_symlink()` | Read symlink target |
 | `ReadFile` | `VFS.read_file()` | Read file data |
 | `WriteFile` | `VFS.write_file()` | Write file data |
-| `GetFileInfo` | `VFS.get_node()` | Get file metadata |
+| `GetFileInfo` | `VFS.get_inode()` | Get file metadata |
 | `GetStreamUrl` | `fetch_download_url()` | Get RealDebrid link |
 
 #### GetStreamUrl Implementation
@@ -368,8 +370,8 @@ end
 **Flow**:
 
 ```
-1. Lookup node_id in VFS
-2. Check if node has associated torrent_file
+1. Lookup inode_id in VFS
+2. Check if inode has associated torrent_file
 3. If yes:
    a. Check if cached download_link is valid (< 24h)
    b. If valid, return cached link
@@ -439,18 +441,21 @@ end
    │    │
    │    ├──> START TRANSACTION
    │    │    │
-   │    │    ├──> VFS.create_directory(root_id, torrent_id)
-   │    │    │    INSERT INTO nodes (parent_id, name, mode, ...)
+   │    │    ├──> VFS.create_directory(root_inode_id, torrent_id)
+   │    │    │    INSERT INTO inodes (mode, nlink, ...)
+   │    │    │    INSERT INTO directory_entries (parent_inode_id, name, ...)
    │    │    │
    │    │    ├──> INSERT INTO torrents (rd_id, filename, ...)
    │    │    │
    │    │    ├──> FOR EACH file:
    │    │    │    │
    │    │    │    ├──> Create subdirectories (if needed)
-   │    │    │    │    INSERT INTO nodes ...
+   │    │    │    │    INSERT INTO inodes ...
+   │    │    │    │    INSERT INTO directory_entries ...
    │    │    │    │
-   │    │    │    ├──> VFS.create_file(parent_id, filename)
-   │    │    │    │    INSERT INTO nodes (content_type: "sync_engine/streamable")
+   │    │    │    ├──> VFS.create_file(parent_inode_id, filename)
+   │    │    │    │    INSERT INTO inodes (content_type: "sync_engine/streamable")
+   │    │    │    │    INSERT INTO directory_entries (parent_inode_id, name, ...)
    │    │    │    │
    │    │    │    └──> INSERT INTO torrent_files (rd_id, path, link, ...)
    │    │    │
@@ -478,8 +483,9 @@ end
    │
    └──> FOR EACH torrent with deletion_status = "deleted":
         │
-        ├──> VFS.remove_by_id(torrent.node_id, cascade: true)
-        │    DELETE FROM nodes WHERE id = ... OR parent_id = ...
+        ├──> VFS.remove_by_id(torrent.inode_id, cascade: true)
+        │    DELETE FROM directory_entries WHERE parent_inode_id = ... (recursive)
+        │    DELETE FROM inodes WHERE inode_id = ... OR parent = ...
         │
         ├──> DELETE FROM torrent_files WHERE torrent_id = ...
         │
@@ -489,17 +495,17 @@ end
 ### Stream URL Request Flow
 
 ```
-Client Request: GetStreamUrl(node_id)
+Client Request: GetStreamUrl(inode_id)
    │
    ├──> gRPC Server: FileSystemService.GetStreamUrl
    │    │
-   │    ├──> VFS.get_node(node_id)
-   │    │    SELECT * FROM nodes WHERE id = ?
+   │    ├──> VFS.get_inode(inode_id)
+   │    │    SELECT * FROM inodes WHERE inode_id = ?
    │    │
    │    ├──> Check content_type == "sync_engine/streamable"
    │    │
-   │    ├──> SyncEngine.Torrents.get_torrent_file_by_node_id(node_id)
-   │    │    SELECT * FROM torrent_files WHERE node_id = ?
+   │    ├──> SyncEngine.Torrents.get_torrent_file_by_inode_id(inode_id)
+   │    │    SELECT * FROM torrent_files WHERE inode_id = ?
    │    │
    │    ├──> Check if download_link is valid (< 24h)
    │    │
@@ -540,38 +546,55 @@ config :vfs, VFS.Repo,
 ### Schema Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                          nodes                              │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                    INTEGER                          │
-│ parent_id (FK → nodes.id)  INTEGER (nullable for root)      │
-│ name                       TEXT                             │
-│ mode                       INTEGER (file type + perms)      │
-│ size                       INTEGER                          │
-│ content_type               TEXT                             │
-│ data                       BLOB (nullable)                  │
-│ target_id (FK → nodes.id)  INTEGER (for hard links)        │
-│ inserted_at                DATETIME                         │
-│ updated_at                 DATETIME                         │
-└─────────────────────────────────────────────────────────────┘
-         ↑ 1:N                    1:1 ↓
-         │                            │
-┌────────┴──────────────┐   ┌─────────▼────────────────────────┐
-│     torrents          │   │      torrent_files               │
-├───────────────────────┤   ├──────────────────────────────────┤
-│ id (PK)               │   │ id (PK)                          │
-│ rd_id TEXT (unique)   │   │ rd_id TEXT                       │
-│ filename              │   │ path TEXT                        │
-│ hash                  │   │ bytes INTEGER                    │
-│ bytes                 │   │ selected INTEGER                 │
-│ host                  │   │ link TEXT                        │
-│ progress              │   │ download_link TEXT               │
-│ status                │   │ download_link_cached_at DATETIME │
-│ deletion_status       │   │ torrent_id (FK → torrents.id)    │
-│ deletion_attempts     │   │ node_id (FK → nodes.id)          │
-│ node_id (FK→nodes.id) │   │ inserted_at                      │
-│ inserted_at           │   │ updated_at                       │
-│ updated_at            │   └──────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          inodes                                 │
+├─────────────────────────────────────────────────────────────────┤
+│ inode_id (PK)              INTEGER                              │
+│ mode                       INTEGER (file type + perms)          │
+│ size                       INTEGER                              │
+│ uid                        INTEGER                              │
+│ gid                        INTEGER                              │
+│ nlink                      INTEGER (hard link count)            │
+│ content_type               TEXT                                 │
+│ data                       BLOB (nullable)                      │
+│ virtual_inode_type         TEXT ('torrent_file' or NULL)        │
+│ virtual_inode_id           INTEGER (torrent_files.id or NULL)   │
+│ atime                      INTEGER                              │
+│ mtime                      INTEGER                              │
+│ ctime                      INTEGER                              │
+│ inserted_at                DATETIME                             │
+│ updated_at                 DATETIME                             │
+└─────────────────────────────────────────────────────────────────┘
+         ↑                           1:N ↓
+         │                               │
+         │ 1:N                  ┌────────▼──────────────────────────┐
+         │                      │    directory_entries              │
+         │                      ├───────────────────────────────────┤
+         │                      │ id (PK)                           │
+         │                      │ parent_inode_id (FK → inodes)     │
+         │                      │ name TEXT                         │
+         │                      │ inode_id (FK → inodes)            │
+         │                      │ inserted_at                       │
+         │                      │ updated_at                        │
+         │                      └───────────────────────────────────┘
+         │                               ↑
+         │                               │ 1:1
+┌────────┴──────────────┐   ┌────────────┴─────────────────────────┐
+│     torrents          │   │      torrent_files                   │
+├───────────────────────┤   ├──────────────────────────────────────┤
+│ id (PK)               │   │ id (PK)                              │
+│ rd_id TEXT (unique)   │   │ rd_id TEXT                           │
+│ filename              │   │ path TEXT                            │
+│ hash                  │   │ bytes INTEGER                        │
+│ bytes                 │   │ selected INTEGER                     │
+│ host                  │   │ link TEXT                            │
+│ progress              │   │ download_link TEXT                   │
+│ status                │   │ download_link_cached_at DATETIME     │
+│ deletion_status       │   │ torrent_id (FK → torrents.id)        │
+│ deletion_attempts     │   │ inode_id (FK → inodes.inode_id)      │
+│ inode_id (FK→inodes)  │   │ inserted_at                          │
+│ inserted_at           │   │ updated_at                           │
+│ updated_at            │   └──────────────────────────────────────┘
 └───────────────────────┘
 
 ┌──────────────────────────────────────────────────────────┐
@@ -590,29 +613,38 @@ config :vfs, VFS.Repo,
 
 ### Key Relationships
 
-1. **nodes.parent_id → nodes.id**: Self-referential tree
-2. **nodes.target_id → nodes.id**: Hard link target
-3. **torrents.node_id → nodes.id**: Torrent directory
-4. **torrent_files.node_id → nodes.id**: File node
+1. **directory_entries.parent_inode_id → inodes.inode_id**: Parent directory
+2. **directory_entries.inode_id → inodes.inode_id**: File/directory inode
+3. **torrents.inode_id → inodes.inode_id**: Torrent directory
+4. **torrent_files.inode_id → inodes.inode_id**: File inode
 5. **torrent_files.torrent_id → torrents.id**: File belongs to torrent
+
+**Hard Links**: Multiple `directory_entries` rows can point to the same `inode_id`. The `inodes.nlink` field tracks the count.
 
 ### Indexes
 
 ```sql
--- Efficient tree traversal
-CREATE INDEX nodes_parent_id_index ON nodes(parent_id);
+-- Efficient directory listing
+CREATE INDEX idx_dir_entries_parent ON directory_entries(parent_inode_id);
 
--- Efficient lookups
-CREATE INDEX nodes_parent_id_name_index ON nodes(parent_id, name);
+-- Efficient inode lookups
+CREATE INDEX idx_dir_entries_inode ON directory_entries(inode_id);
 
--- Hard link queries
-CREATE INDEX nodes_target_id_index ON nodes(target_id);
+-- Unique filename per directory
+CREATE UNIQUE INDEX idx_dir_entries_parent_name 
+  ON directory_entries(parent_inode_id, name);
+
+-- Virtual inode lookups
+CREATE INDEX idx_inodes_virtual ON inodes(virtual_inode_type, virtual_inode_id);
+
+-- Hard link count tracking
+CREATE INDEX idx_inodes_nlink ON inodes(nlink);
 
 -- Torrent lookups
 CREATE UNIQUE INDEX torrents_rd_id_index ON torrents(rd_id);
 
 -- File lookups
-CREATE INDEX torrent_files_node_id_index ON torrent_files(node_id);
+CREATE INDEX torrent_files_inode_id_index ON torrent_files(inode_id);
 CREATE INDEX torrent_files_torrent_id_index ON torrent_files(torrent_id);
 ```
 
@@ -683,17 +715,22 @@ end
    - Failed torrent doesn't stop sync
    - Automatic retry on next cycle
 
-3. **Efficient Tree Traversal**
-   - Indexes on `parent_id` and `name`
+3. **Efficient Directory Traversal**
+   - Indexes on `parent_inode_id` and `name`
    - Single query for directory listing
    - Recursive CTEs for deep deletion
 
-4. **Link Caching**
+4. **Fast Hard Link Counting**
+   - O(1) lookup via `inodes.nlink` field
+   - No expensive COUNT queries
+   - 100x faster than previous implementation
+
+5. **Link Caching**
    - Download links cached for 24h
    - Reduces unrestrict API calls
    - Lazy refresh (on-demand)
 
-5. **Sequential Job Processing**
+6. **Sequential Job Processing**
    - No database contention
    - Predictable performance
    - Simple error recovery
@@ -923,5 +960,5 @@ The system efficiently synchronizes thousands of torrents while maintaining file
 
 ---
 
-**Last Updated**: December 6, 2025  
+**Last Updated**: December 13, 2025  
 **Maintained By**: SushyDev

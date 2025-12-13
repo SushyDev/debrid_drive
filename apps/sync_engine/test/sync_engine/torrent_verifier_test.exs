@@ -13,7 +13,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
     # Create a root and test directory
     {:ok, root} = VFS.get_root()
-    {:ok, test_dir} = VFS.create_directory(root.id, "test_verifier")
+    {:ok, test_dir} = VFS.create_directory(root.inode_id, "test_verifier")
 
     {:ok, test_dir: test_dir, root: root}
   end
@@ -21,8 +21,8 @@ defmodule SyncEngine.TorrentVerifierTest do
   describe "verify_torrent/1" do
     test "keeps torrent when all files exist", %{test_dir: test_dir} do
       # Setup: Create torrent with valid files
-      {:ok, torrent_node} = VFS.create_directory(test_dir.id, "valid_torrent")
-      {:ok, file_node} = VFS.create_file(torrent_node.id, "video.mp4", size: 1000)
+      {:ok, torrent_node} = VFS.create_directory(test_dir.inode_id, "valid_torrent")
+      {:ok, file_node} = VFS.create_file(torrent_node.inode_id, "video.mp4", size: 1000)
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
@@ -30,7 +30,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           filename: "Valid Torrent",
           hash: "hash123",
           bytes: 1000,
-          node_id: torrent_node.id
+          inode_id: torrent_node.inode_id
         })
 
       {:ok, _file} =
@@ -40,7 +40,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 1000,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       # Execute
@@ -58,7 +58,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
     test "handles torrent with no files", %{test_dir: test_dir} do
       # Setup: Create torrent without any files
-      {:ok, torrent_node} = VFS.create_directory(test_dir.id, "empty_torrent")
+      {:ok, torrent_node} = VFS.create_directory(test_dir.inode_id, "empty_torrent")
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
@@ -66,7 +66,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           filename: "Empty Torrent",
           hash: "hash",
           bytes: 0,
-          node_id: torrent_node.id
+          inode_id: torrent_node.inode_id
         })
 
       # Execute
@@ -85,8 +85,8 @@ defmodule SyncEngine.TorrentVerifierTest do
   describe "verify_all/0" do
     test "verifies all torrents and returns summary", %{test_dir: test_dir} do
       # Setup: Create multiple valid torrents
-      {:ok, valid_node1} = VFS.create_directory(test_dir.id, "valid1")
-      {:ok, valid_file1} = VFS.create_file(valid_node1.id, "file1.mp4", size: 100)
+      {:ok, valid_node1} = VFS.create_directory(test_dir.inode_id, "valid1")
+      {:ok, valid_file1} = VFS.create_file(valid_node1.inode_id, "file1.mp4", size: 100)
 
       {:ok, valid_torrent1} =
         Torrents.create_torrent(%{
@@ -94,7 +94,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           filename: "Valid 1",
           hash: "hash1",
           bytes: 100,
-          node_id: valid_node1.id
+          inode_id: valid_node1.inode_id
         })
 
       {:ok, _} =
@@ -104,11 +104,11 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 100,
           selected: 1,
           torrent_id: valid_torrent1.id,
-          node_id: valid_file1.id
+          inode_id: valid_file1.inode_id
         })
 
-      {:ok, valid_node2} = VFS.create_directory(test_dir.id, "valid2")
-      {:ok, valid_file2} = VFS.create_file(valid_node2.id, "file2.mp4", size: 200)
+      {:ok, valid_node2} = VFS.create_directory(test_dir.inode_id, "valid2")
+      {:ok, valid_file2} = VFS.create_file(valid_node2.inode_id, "file2.mp4", size: 200)
 
       {:ok, valid_torrent2} =
         Torrents.create_torrent(%{
@@ -116,7 +116,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           filename: "Valid 2",
           hash: "hash2",
           bytes: 200,
-          node_id: valid_node2.id
+          inode_id: valid_node2.inode_id
         })
 
       {:ok, _} =
@@ -126,7 +126,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 200,
           selected: 1,
           torrent_id: valid_torrent2.id,
-          node_id: valid_file2.id
+          inode_id: valid_file2.inode_id
         })
 
       # Execute
@@ -158,8 +158,8 @@ defmodule SyncEngine.TorrentVerifierTest do
   describe "verify_by_rd_id/1" do
     test "verifies torrent by RD ID", %{test_dir: test_dir} do
       # Setup
-      {:ok, torrent_node} = VFS.create_directory(test_dir.id, "by_rd_id")
-      {:ok, file_node} = VFS.create_file(torrent_node.id, "video.mp4", size: 1000)
+      {:ok, torrent_node} = VFS.create_directory(test_dir.inode_id, "by_rd_id")
+      {:ok, file_node} = VFS.create_file(torrent_node.inode_id, "video.mp4", size: 1000)
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
@@ -167,7 +167,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           filename: "Find Me",
           hash: "hash",
           bytes: 1000,
-          node_id: torrent_node.id
+          inode_id: torrent_node.inode_id
         })
 
       {:ok, _} =
@@ -177,7 +177,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 1000,
           selected: 1,
           torrent_id: torrent.id,
-          node_id: file_node.id
+          inode_id: file_node.inode_id
         })
 
       # Execute

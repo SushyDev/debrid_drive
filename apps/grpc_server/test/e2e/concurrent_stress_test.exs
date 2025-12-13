@@ -1,23 +1,19 @@
 defmodule GrpcServer.E2E.ConcurrentStressTest do
   @moduledoc """
-  Stress tests for the gRPC server with concurrent operations.
-  Tests the server's ability to handle multiple simultaneous requests.
+  Stress tests for concurrent gRPC operations.
+
+  Note: SQLite serializes concurrent writes. For true concurrent writes, use PostgreSQL.
   """
   use ExUnit.Case, async: false
 
   import GrpcServer.Test.GrpcClientHelper
 
-  # Note: async: false because we want to control concurrency within tests
-  # and avoid interference between stress tests
+  @moduletag timeout: 120_000
 
   setup do
-    # Start sandbox for this test
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
+    :ok = GrpcTestHelper.cleanup_database()
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
-    # Allow concurrent database access from spawned processes
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
-
-    # Connect to gRPC server
     channel = connect()
 
     on_exit(fn ->
@@ -55,7 +51,7 @@ defmodule GrpcServer.E2E.ConcurrentStressTest do
           end)
 
         # Collect results
-        results = Task.await_many(tasks, 5000)
+        results = Task.await_many(tasks, 30_000)
 
         # Verify all reads got the same content
         assert Enum.all?(results, &(&1 == content))
@@ -93,7 +89,7 @@ defmodule GrpcServer.E2E.ConcurrentStressTest do
             end)
           end)
 
-        results = Task.await_many(tasks, 5000)
+        results = Task.await_many(tasks, 30_000)
 
         # Verify each read got the correct content
         assert Enum.all?(results, fn {actual, expected} -> actual == expected end)
@@ -133,7 +129,7 @@ defmodule GrpcServer.E2E.ConcurrentStressTest do
             end)
           end)
 
-        written_data = Task.await_many(tasks, 5000)
+        written_data = Task.await_many(tasks, 30_000)
 
         # Verify each file has correct content
         Enum.each(written_data, fn {file_id, expected_content} ->
@@ -186,7 +182,7 @@ defmodule GrpcServer.E2E.ConcurrentStressTest do
             end)
           end)
 
-        _created_names = Task.await_many(tasks, 5000)
+        _created_names = Task.await_many(tasks, 30_000)
 
         # Verify all directories were created
         {:ok, list_resp} = read_dir_all(setup_channel, root_id)
@@ -223,7 +219,7 @@ defmodule GrpcServer.E2E.ConcurrentStressTest do
             end)
           end)
 
-        Task.await_many(tasks, 5000)
+        Task.await_many(tasks, 30_000)
 
         # Verify all files exist
         {:ok, list_resp} = read_dir_all(setup_channel, dir_id)

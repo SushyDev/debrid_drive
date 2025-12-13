@@ -1,4 +1,6 @@
+# Suppress logs during tests for cleaner output
+Logger.configure(level: :emergency)
+
 ExUnit.start()
 
-# Setup test database
 Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, :manual)

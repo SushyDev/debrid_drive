@@ -355,23 +355,33 @@ defmodule SyncEngine.Torrents do
             # Preload files to find hardlinks pointing to them
             torrent = Repo.preload(torrent, :files)
 
-            # Get the parent directory node_id (if exists)
-            parent_node_id = torrent.node_id
+            # Get the parent directory inode_id (if exists)
+            parent_inode_id = torrent.inode_id
 
-            # Delete all hard links pointing to this torrent's virtual inode files
-            # (Virtual inodes are being deleted, so hardlinks can't exist without them)
+            # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
+            # The virtual inodes are being deleted, so hardlinks can't exist without them
             Enum.each(torrent.files, fn torrent_file ->
-              # Find hardlinks pointing to this virtual inode using is_hardlink and hardlink_target_id
-              hardlinks =
+              # Find all directory entries pointing to inodes with this virtual_inode_id
+              # These are the hardlinks to this torrent file
+              hardlink_entries =
                 Repo.all(
-                  from(n in Node,
+                  from(de in VFS.DirectoryEntry,
+                    join: i in VFS.Inode,
+                    on: de.inode_id == i.inode_id,
                     where:
-                      n.is_hardlink == true and
-                        n.hardlink_target_torrent_file_id == ^torrent_file.id
+                      i.virtual_inode_type == "torrent_file" and
+                        i.virtual_inode_id == ^torrent_file.id,
+                    select: de
                   )
                 )
 
-              Enum.each(hardlinks, fn link -> VFS.remove_by_id(link.id) end)
+              # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
+              Enum.each(hardlink_entries, fn entry ->
+                case VFS.remove(entry.parent_inode_id, entry.name) do
+                  :ok -> :ok
+                  {:error, _} -> :ok
+                end
+              end)
             end)
 
             # Delete all torrent_file records (the virtual inodes)
@@ -382,26 +392,38 @@ defmodule SyncEngine.Torrents do
             Repo.delete!(torrent)
 
             # Try to delete the parent directory if it's empty
-            if parent_node_id do
-              case VFS.get_node(parent_node_id) do
-                {:ok, node} ->
+            if parent_inode_id do
+              case VFS.get_node(parent_inode_id) do
+                {:ok, inode} ->
                   # Check if directory is empty
-                  children = VFS.list_children(node.id)
+                  children = VFS.list_children(inode.inode_id)
 
                   if length(children) == 0 do
                     # Delete empty torrent directory
-                    # VFS.remove_by_id returns the deleted node directly, not {:ok, node}
-                    try do
-                      VFS.remove_by_id(node.id)
-                      :ok
-                    rescue
-                      # Ignore errors, directory might be user-managed
-                      _ -> :ok
+                    # Need to find the directory entry for this inode to delete it
+                    # Get the parent of this directory to call remove_entry
+                    case Repo.one(
+                           from(de in VFS.DirectoryEntry,
+                             where: de.inode_id == ^inode.inode_id,
+                             limit: 1
+                           )
+                         ) do
+                      %VFS.DirectoryEntry{} = entry ->
+                        try do
+                          VFS.remove(entry.parent_inode_id, entry.name)
+                          :ok
+                        rescue
+                          # Ignore errors, directory might be user-managed
+                          _ -> :ok
+                        end
+
+                      nil ->
+                        :ok
                     end
                   end
 
                 {:error, :not_found} ->
-                  # Node already deleted, that's fine
+                  # Inode already deleted, that's fine
                   :ok
               end
             end

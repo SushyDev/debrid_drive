@@ -1,5 +1,5 @@
 defmodule SyncEngineTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
   doctest SyncEngine
 
   test "greets the world" do

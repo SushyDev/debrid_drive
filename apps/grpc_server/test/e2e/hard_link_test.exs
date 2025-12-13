@@ -14,8 +14,9 @@ defmodule GrpcServer.E2E.HardLinkTest do
   alias SyncEngine.Schemas.{Torrent, TorrentFile}
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(VFS.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(VFS.Repo, {:shared, self()})
+    :ok = GrpcTestHelper.cleanup_database()
+
+    :ok = GrpcTestHelper.wait_for_db_ready()
 
     channel = connect()
 
@@ -116,7 +117,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
 
       # Try to get stream URL - will fail because we don't have Real Debrid setup in test env
       # But this proves the hardlink resolution and streamable detection works
-      {:error, %GRPC.RPCError{}} = get_stream_url(channel, streamable_node.id)
+      {:error, %GRPC.RPCError{}} = get_stream_url(channel, streamable_node.inode_id)
     end
 
     test "returns error when target node doesn't exist", %{channel: channel} do
@@ -235,26 +236,50 @@ defmodule GrpcServer.E2E.HardLinkTest do
   end
 
   describe "Hard link chains" do
-    test "hard link cannot point to another hard link", %{channel: channel} do
+    test "hard link to hardlink follows POSIX semantics (links to original target)", %{
+      channel: channel
+    } do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
-      # Create target file
+      # Create target file with some data
       {:ok, _create_resp} = create_file(channel, root_id, "target.txt")
       {:ok, target_resp} = lookup(channel, root_id, "target.txt")
       target_id = target_resp.node.id
+
+      test_data = "POSIX hardlink test data"
+      {:ok, _} = write_file(channel, target_id, test_data)
 
       # Create first hard link pointing to target
       {:ok, link1_resp} = create_link(channel, target_id, root_id, "link1")
       link1_id = link1_resp.node.id
 
-      # Attempting to create second hard link pointing to first hard link should fail
-      assert {:error,
-              %GRPC.RPCError{status: 3, message: "Cannot create a hard link to another hard link"}} =
-               create_link(channel, link1_id, root_id, "link2")
+      # Create second hard link pointing to first hard link
+      # POSIX semantics: this should succeed and create another link to the original target
+      {:ok, link2_resp} = create_link(channel, link1_id, root_id, "link2")
+      link2_id = link2_resp.node.id
+
+      # All three nodes (target, link1, link2) should have the same data
+      {:ok, target_data} = read_file(channel, target_id)
+      {:ok, link1_data} = read_file(channel, link1_id)
+      {:ok, link2_data} = read_file(channel, link2_id)
+
+      assert target_data.data == test_data
+      assert link1_data.data == test_data
+      assert link2_data.data == test_data
+
+      # Writing to link2 should be visible in target and link1
+      new_data = "Updated via link2"
+      {:ok, _} = write_file(channel, link2_id, new_data)
+
+      {:ok, updated_target} = read_file(channel, target_id)
+      {:ok, updated_link1} = read_file(channel, link1_id)
+
+      assert updated_target.data == new_data
+      assert updated_link1.data == new_data
     end
 
-    test "cannot create hard link chain to streamable file", %{channel: channel} do
+    test "can create multiple hardlinks to streamable file (virtual inode)", %{channel: channel} do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
@@ -266,16 +291,27 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, lookup_resp} = lookup(channel, root_id, "video.mkv")
       assert lookup_resp.node.streamable == true
 
-      # Attempting to create a hard link pointing to the streamable file should fail
-      # (because streamable_node is already a hardlink)
-      assert {:error,
-              %GRPC.RPCError{status: 3, message: "Cannot create a hard link to another hard link"}} =
-               create_link(channel, streamable_node.id, root_id, "link_to_streamable")
+      # Creating a hard link to the streamable file now succeeds
+      # This creates another hardlink to the same virtual inode
+      {:ok, copy_resp} = create_link(channel, streamable_node.inode_id, root_id, "video_copy.mkv")
+
+      # Verify the copy is also streamable
+      {:ok, copy_lookup_resp} = lookup(channel, root_id, "video_copy.mkv")
+      assert copy_lookup_resp.node.streamable == true
+
+      # Verify both point to the same virtual inode
+      {:ok, original_node} = VFS.get_node(streamable_node.inode_id)
+      {:ok, copy_node} = VFS.get_node(copy_resp.node.id)
+
+      {:ok, original_inode_id} = VFS.extract_virtual_inode_id(original_node)
+      {:ok, copy_inode_id} = VFS.extract_virtual_inode_id(copy_node)
+
+      assert original_inode_id == copy_inode_id
     end
   end
 
   describe "Hard link deletion behavior" do
-    test "deleting parent deletes hard link", %{channel: channel} do
+    test "deleting parent deletes hard link directory entry", %{channel: channel} do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
@@ -288,25 +324,41 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, target_resp} = lookup(channel, root_id, "target.txt")
       target_id = target_resp.node.id
 
+      # Get initial nlink count
+      initial_nlink = target_resp.node.nlink
+
       # Create hard link in the directory
       {:ok, link_resp} = create_link(channel, target_id, dir_id, "link_to_target")
-      link_id = link_resp.node.id
+      link_inode_id = link_resp.node.id
 
-      # Verify hard link exists
-      assert {:ok, _} = lookup(channel, dir_id, "link_to_target")
+      # Both should point to the same inode (POSIX hardlink semantics)
+      assert link_inode_id == target_id
+
+      # Verify nlink count was incremented
+      assert link_resp.node.nlink == initial_nlink + 1
+
+      # Verify hard link exists via lookup and points to same inode
+      {:ok, lookup_resp} = lookup(channel, dir_id, "link_to_target")
+      assert lookup_resp.node.id == target_id
+      assert lookup_resp.node.nlink == initial_nlink + 1
 
       # Delete parent directory
       assert {:ok, _} = remove(channel, root_id, "parent_dir")
 
-      # Verify hard link is gone
-      assert {:error, :not_found} = VFS.get_node(link_id)
+      # The directory itself is now gone
+      assert {:error, :not_found} = VFS.get_node(dir_id)
 
-      # Target file should still exist
+      # But the inode still exists because target.txt still points to it (POSIX semantics)
+      assert {:ok, _inode} = VFS.get_node(link_inode_id)
+
+      # Target file should still exist and accessible
       {:ok, lookup_resp} = lookup(channel, root_id, "target.txt")
       assert lookup_resp.node.id == target_id
     end
 
-    test "deleting target doesn't delete hard link but makes it broken", %{channel: channel} do
+    test "deleting one directory entry doesn't affect other hardlinks (POSIX semantics)", %{
+      channel: channel
+    } do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
@@ -319,19 +371,25 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, link_resp} = create_link(channel, target_id, root_id, "link_to_target")
       link_id = link_resp.node.id
 
+      # They should share the same inode
+      assert link_id == target_id
+
       # Delete target file
       assert {:ok, _} = remove(channel, root_id, "target.txt")
 
-      # Hard link should still exist
+      # Hard link should still exist and work perfectly (POSIX semantics)
       {:ok, lookup_resp} = lookup(channel, root_id, "link_to_target")
       assert lookup_resp.node.id == link_id
 
-      # But reading it should fail (broken hard link)
-      {:ok, link_node} = VFS.get_node(link_id)
-      assert {:error, :not_found} = VFS.get_node(String.to_integer(link_node.data))
+      # The inode is still accessible
+      {:ok, inode} = VFS.get_node(target_id)
+      # Down from 2 to 1
+      assert inode.nlink == 1
     end
 
-    test "deleting hard link target makes remaining hard links broken", %{channel: channel} do
+    test "deleting all directory entries eventually deletes the inode (nlink tracking)", %{
+      channel: channel
+    } do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
@@ -340,27 +398,42 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, target_resp} = lookup(channel, root_id, "target.txt")
       target_id = target_resp.node.id
 
-      # Create two hard links pointing directly to the target
+      # Create two hard links pointing to the same inode
       {:ok, link1_resp} = create_link(channel, target_id, root_id, "link1")
       link1_id = link1_resp.node.id
       {:ok, link2_resp} = create_link(channel, target_id, root_id, "link2")
       link2_id = link2_resp.node.id
 
+      # All should share the same inode
+      assert link1_id == target_id
+      assert link2_id == target_id
+
+      # Verify nlink=3 (target.txt + link1 + link2)
+      {:ok, inode} = VFS.get_node(target_id)
+      assert inode.nlink == 3
+
       # Delete target file
       assert {:ok, _} = remove(channel, root_id, "target.txt")
 
-      # Both hard links should still exist but are now broken
-      {:ok, link1_node} = VFS.get_node(link1_id)
-      assert VFS.is_hardlink?(link1_node)
-      {:ok, link2_node} = VFS.get_node(link2_id)
-      assert VFS.is_hardlink?(link2_node)
+      # Inode should still exist with nlink=2
+      {:ok, inode} = VFS.get_node(target_id)
+      assert inode.nlink == 2
 
-      # But the target they point to is gone
-      assert {:error, :not_found} = VFS.get_node(String.to_integer(link1_node.data))
-      assert {:error, :not_found} = VFS.get_node(String.to_integer(link2_node.data))
+      # Delete link1
+      assert {:ok, _} = remove(channel, root_id, "link1")
+
+      # Inode should still exist with nlink=1
+      {:ok, inode} = VFS.get_node(target_id)
+      assert inode.nlink == 1
+
+      # Delete link2 (last reference)
+      assert {:ok, _} = remove(channel, root_id, "link2")
+
+      # NOW the inode should be gone (nlink reached 0)
+      assert {:error, :not_found} = VFS.get_node(target_id)
     end
 
-    test "deleting final target breaks all hard links pointing to it", %{channel: channel} do
+    test "deleting virtual inode makes hardlinks non-streamable", %{channel: channel} do
       {:ok, root_resp} = get_root(channel)
       root_id = root_resp.root.id
 
@@ -396,12 +469,15 @@ defmodule GrpcServer.E2E.HardLinkTest do
       {:ok, link1} =
         VFS.create_hardlink_to_virtual_inode(root_id, "link1", torrent_file.id)
 
-      link1_id = link1.id
+      link1_id = link1.inode_id
 
       {:ok, link2} =
         VFS.create_hardlink_to_virtual_inode(root_id, "link2", torrent_file.id)
 
-      link2_id = link2.id
+      link2_id = link2.inode_id
+
+      # They should share the same inode since they're both hardlinks to the same virtual inode
+      assert link1_id == link2_id
 
       # Verify both are streamable before deletion
       {:ok, lookup_resp} = lookup(channel, root_id, "link1")
@@ -412,13 +488,13 @@ defmodule GrpcServer.E2E.HardLinkTest do
       # Delete the virtual inode (torrent_file)
       {:ok, _} = VFS.Repo.delete(torrent_file)
 
-      # Both hard links should still exist
-      {:ok, link1_node} = VFS.get_node(link1_id)
-      assert VFS.is_hardlink?(link1_node)
-      {:ok, link2_node} = VFS.get_node(link2_id)
-      assert VFS.is_hardlink?(link2_node)
+      # Both hard links (directory entries) should still exist
+      {:ok, lookup_resp} = lookup(channel, root_id, "link1")
+      assert lookup_resp.node.id == link1_id
+      {:ok, lookup_resp} = lookup(channel, root_id, "link2")
+      assert lookup_resp.node.id == link2_id
 
-      # But they should no longer be marked as streamable (broken links)
+      # But they should no longer be marked as streamable (broken virtual inode reference)
       {:ok, lookup_resp} = lookup(channel, root_id, "link1")
       assert lookup_resp.node.streamable == false
       {:ok, lookup_resp} = lookup(channel, root_id, "link2")
@@ -474,7 +550,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
 
       # Getting stream URL will fail due to Real Debrid API unavailability in test
       # but this proves the virtual inode setup and hardlink resolution works
-      {:error, %GRPC.RPCError{}} = get_stream_url(channel, streamable_node.id)
+      {:error, %GRPC.RPCError{}} = get_stream_url(channel, streamable_node.inode_id)
     end
   end
 

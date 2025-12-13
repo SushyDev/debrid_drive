@@ -1,11 +1,7 @@
 import Config
 
-# Disable SQL query logging in tests
-config :logger, level: :warning
-
-# Disable gRPC logging in tests - set logger to only show errors
+# Logger configured in individual test_helper.exs files
 config :logger, :console,
-  level: :warning,
   format: "$time $metadata[$level] $message\n",
   metadata: [:pid, :application, :module]
 
@@ -14,16 +10,20 @@ if config_env() == :test do
   config :vfs, VFS.Repo,
     database: Path.expand("../debrid_stream_test.db", __DIR__),
     pool: Ecto.Adapters.SQL.Sandbox,
-    pool_size: 10,
+    pool_size: 50,
     stacktrace: true,
     show_sensitive_data_on_connection_error: true,
     log: false,
-    # SQLite concurrency optimizations
+    # SQLite concurrency optimizations  
+    # Note: SQLite uses a single writer, concurrent writes are serialized
     journal_mode: :wal,
-    busy_timeout: 5000,
+    busy_timeout: 60_000,
     cache_size: -64000,
     temp_store: :memory,
-    synchronous: :normal
+    synchronous: :normal,
+    # Longer queue time for tests
+    queue_target: 5000,
+    queue_interval: 1000
 end
 
 # Disable Oban queues in test environment
