@@ -37,7 +37,7 @@ end
 # Returns: {:ok, %Torrent{}} | {:error, %Ecto.Changeset{}}
 
 def create_directory(parent_id, name, opts \\ []) do
-  Repo.transaction(fn ->
+  Repo.transact(fn ->
     # ... creation logic
     inode
   end)
@@ -88,7 +88,7 @@ end
 ```elixir
 def remove(parent_id, name, opts \\ []) do
   result =
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # ... deletion logic
     end)
 
@@ -331,7 +331,7 @@ end
 
 ```elixir
 def create_directory(parent_id, name) do
-  Repo.transaction(fn ->
+  Repo.transact(fn ->
     {:ok, inode} =
       %Inode{}
       |> Inode.changeset(%{mode: FileMode.directory_mode()})

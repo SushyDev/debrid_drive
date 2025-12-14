@@ -26,7 +26,7 @@ defmodule VFS do
 
   defp get_root_with_retry(attempts_left) do
     try do
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         case Repo.get(Inode, 1) do
           nil ->
             # Root doesn't exist, create it
@@ -100,7 +100,7 @@ defmodule VFS do
     permissions = Keyword.get(opts, :mode, 0o755)
     mode = FileMode.directory_mode(permissions)
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Create inode
       {:ok, inode} =
         %Inode{}
@@ -141,7 +141,7 @@ defmodule VFS do
     size = Keyword.get(opts, :size, if(data, do: byte_size(data), else: 0))
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Create inode
       {:ok, inode} =
         %Inode{}
@@ -187,7 +187,7 @@ defmodule VFS do
     - `{:error, reason}` on failure
   """
   def create_hardlink(parent_inode_id, name, target_inode_id) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Get target inode
       target_inode = Repo.get!(Inode, target_inode_id)
 
@@ -315,7 +315,7 @@ defmodule VFS do
   Moves/renames a directory entry.
   """
   def move(parent_inode_id, old_name, new_parent_inode_id, new_name) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Find the directory entry
       entry =
         DirectoryEntry
@@ -362,7 +362,7 @@ defmodule VFS do
     cascade = Keyword.get(opts, :cascade, true)
 
     result =
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         # Find directory entry
         entry =
           DirectoryEntry
@@ -606,7 +606,7 @@ defmodule VFS do
   def create_hardlink_to_virtual_inode(parent_inode_id, name, virtual_inode_id, opts \\ []) do
     size = Keyword.get(opts, :size, 0)
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Check if virtual inode already exists
       # Note: SQLite doesn't support row-level locking (FOR UPDATE), so we rely on
       # the unique constraint to handle concurrent creation attempts gracefully
