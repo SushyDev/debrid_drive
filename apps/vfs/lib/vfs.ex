@@ -429,7 +429,13 @@ defmodule VFS do
       if inode.virtual_inode_type == "torrent_file" do
         case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
           {:ok, torrent_file} ->
-            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+            case SyncEngine.Torrents.decrement_hardlink_count(torrent_file) do
+              {:ok, _result} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning("Failed to decrement hardlink count for torrent_file #{inode.virtual_inode_id}: #{inspect(reason)}")
+            end
 
           {:error, :not_found} ->
             Logger.warning("Torrent file #{inode.virtual_inode_id} not found when removing last hardlink to inode #{inode.inode_id}")
@@ -450,7 +456,13 @@ defmodule VFS do
       if inode.virtual_inode_type == "torrent_file" do
         case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
           {:ok, torrent_file} ->
-            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+            case SyncEngine.Torrents.decrement_hardlink_count(torrent_file) do
+              {:ok, _result} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning("Failed to decrement hardlink count for torrent_file #{inode.virtual_inode_id}: #{inspect(reason)}")
+            end
 
           {:error, :not_found} ->
             Logger.warning("Torrent file #{inode.virtual_inode_id} not found when removing hardlink to inode #{inode.inode_id}")
