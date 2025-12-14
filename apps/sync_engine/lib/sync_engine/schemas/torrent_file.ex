@@ -4,8 +4,6 @@ defmodule SyncEngine.Schemas.TorrentFile do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  alias VFS.Node
-  alias SyncEngine.Schemas.Torrent
 
   schema "torrent_files" do
     # Real Debrid file fields
@@ -27,8 +25,9 @@ defmodule SyncEngine.Schemas.TorrentFile do
     # When count reaches 0, all user references are gone
     field(:hardlink_count, :integer, default: 1)
 
-    # Relationships
-    belongs_to(:torrent, Torrent)
+    # Relationships - using hash instead of ID for resilience
+    # Torrent hash is immutable, while torrent ID can change if torrent is re-added
+    field(:torrent_hash, :string)
     # Reference to the inode representing this file in VFS
     field(:inode_id, :integer)
 
@@ -44,17 +43,16 @@ defmodule SyncEngine.Schemas.TorrentFile do
       :bytes,
       :selected,
       :link,
-      :torrent_id,
+      :torrent_hash,
       :inode_id,
       :download_link,
       :link_expires_at,
       :link_fetched_at,
       :hardlink_count
     ])
-    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_id])
+    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_hash])
     |> validate_number(:hardlink_count, greater_than_or_equal_to: 0)
-    |> unique_constraint([:torrent_id, :rd_id])
-    |> foreign_key_constraint(:torrent_id)
+    |> unique_constraint([:torrent_hash, :rd_id])
     |> foreign_key_constraint(:inode_id)
   end
 

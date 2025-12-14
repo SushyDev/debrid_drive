@@ -195,7 +195,7 @@ defmodule GrpcServer.FileSystemService.Server do
   # Handle virtual inode removal with reference counting
   # The VFS.remove function now handles nlink decrement automatically
   defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
-    VFS.Repo.transaction(fn ->
+    VFS.Repo.transact(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
         {:ok, virtual_inode} ->
           # Check if this is the last link before removing
@@ -232,7 +232,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Enqueue torrent deletion when last hardlink is removed
   defp enqueue_torrent_deletion_on_remove(virtual_inode) do
-    case SyncEngine.Torrents.get_torrent(virtual_inode.torrent_id) do
+    case SyncEngine.Torrents.get_torrent_by_hash(virtual_inode.torrent_hash) do
       {:ok, torrent} ->
         Logger.info(
           "All hardlinks removed for torrent #{torrent.rd_id}, " <>
@@ -240,7 +240,7 @@ defmodule GrpcServer.FileSystemService.Server do
         )
 
         # Queue deletion job
-        SyncEngine.Workers.DeletionWorker.enqueue(torrent.id)
+        SyncEngine.Workers.DeletionWorker.enqueue(torrent.hash)
         :ok
 
       {:error, :not_found} ->
@@ -357,13 +357,11 @@ defmodule GrpcServer.FileSystemService.Server do
   # Helper to get any name for an inode (for cases where we don't have the directory entry context)
   # Returns a name if found, or "(deleted)" if the inode has no directory entries
   defp get_any_name_for_inode(inode_id) do
-    case VFS.Repo.one(
-           from(de in VFS.DirectoryEntry,
-             where: de.inode_id == ^inode_id,
-             limit: 1,
-             select: de.name
-           )
-         ) do
+    case VFS.DirectoryEntry
+         |> where([directory_entry], directory_entry.inode_id == ^inode_id)
+         |> limit(1)
+         |> select([directory_entry], directory_entry.name)
+         |> VFS.Repo.one() do
       nil -> "(deleted)"
       name -> name
     end
@@ -568,9 +566,7 @@ defmodule GrpcServer.FileSystemService.Server do
   # Only virtual inodes can be streamed
   defp resolve_to_torrent_file(inode) do
     if inode.virtual_inode_type == "torrent_file" and inode.virtual_inode_id do
-      Logger.info(
-        "resolve_to_torrent_file: resolving virtual inode #{inode.inode_id} -> torrent_file #{inode.virtual_inode_id}"
-      )
+      Logger.info("resolve_to_torrent_file: resolving virtual inode #{inode.inode_id} -> torrent_file #{inode.virtual_inode_id}")
 
       case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
         {:ok, torrent_file} ->

@@ -115,10 +115,9 @@ defmodule VFS.Node do
     alias VFS.Repo
 
     Repo.one(
-      from(node in __MODULE__,
-        where: node.parent_id == ^node_id,
-        select: count(node.id)
-      )
+      __MODULE__
+      |> where([node], node.parent_id == ^node_id)
+      |> select([node], count(node.id))
     ) || 0
   end
 end

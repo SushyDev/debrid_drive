@@ -148,14 +148,14 @@ defmodule SyncEngine.TorrentsTest do
         path: "/test_file.mp4",
         bytes: 500,
         selected: 1,
-        torrent_id: torrent.id,
+        torrent_hash: torrent.hash,
         inode_id: file_node.inode_id
       }
 
       assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
       assert file.rd_id == 1
       assert file.path == "/test_file.mp4"
-      assert file.torrent_id == torrent.id
+      assert file.torrent_hash == torrent.hash
     end
 
     test "list_torrent_files/1 returns files for torrent", %{
@@ -168,11 +168,11 @@ defmodule SyncEngine.TorrentsTest do
           path: "/file1.mp4",
           bytes: 500,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 
-      files = Torrents.list_torrent_files(torrent.id)
+      files = Torrents.list_torrent_files(torrent.hash)
       assert length(files) == 1
     end
 
@@ -183,13 +183,13 @@ defmodule SyncEngine.TorrentsTest do
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 
-      assert length(Torrents.list_torrent_files(torrent.id)) == 1
+      assert length(Torrents.list_torrent_files(torrent.hash)) == 1
       {:ok, _} = Torrents.delete_torrent(torrent)
-      assert length(Torrents.list_torrent_files(torrent.id)) == 0
+      assert length(Torrents.list_torrent_files(torrent.hash)) == 0
     end
 
     test "create_torrent_file/1 creates virtual inode (inode_id: nil)", %{torrent: torrent} do
@@ -199,7 +199,7 @@ defmodule SyncEngine.TorrentsTest do
         path: "/movie.mkv",
         bytes: 2_000_000,
         selected: 1,
-        torrent_id: torrent.id,
+        torrent_hash: torrent.hash,
         inode_id: nil,
         link: "https://real-debrid.com/unrestrict?link=abc123"
       }
@@ -207,7 +207,7 @@ defmodule SyncEngine.TorrentsTest do
       assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
       assert file.rd_id == 2
       assert file.path == "/movie.mkv"
-      assert file.torrent_id == torrent.id
+      assert file.torrent_hash == torrent.hash
       assert file.inode_id == nil
       assert file.hardlink_count == 1
       assert file.link == "https://real-debrid.com/unrestrict?link=abc123"
@@ -221,7 +221,7 @@ defmodule SyncEngine.TorrentsTest do
           path: "/series.mkv",
           bytes: 3_000_000,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: nil,
           link: "https://real-debrid.com/unrestrict?link=def456"
         })
@@ -268,7 +268,7 @@ defmodule SyncEngine.TorrentsTest do
           path: "/movie.mkv",
           bytes: 5_000_000,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: nil,
           link: "https://real-debrid.com/link1"
         })
@@ -279,7 +279,7 @@ defmodule SyncEngine.TorrentsTest do
           path: "/subtitle.srt",
           bytes: 100_000,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: nil,
           link: "https://real-debrid.com/link2"
         })

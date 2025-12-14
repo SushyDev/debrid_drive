@@ -39,7 +39,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           path: "/video.mp4",
           bytes: 1000,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 
@@ -53,7 +53,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       # Torrent still exists
       assert {:ok, _} = Torrents.get_torrent_by_rd_id("VALID123")
-      assert length(Torrents.list_torrent_files(torrent.id)) == 1
+      assert length(Torrents.list_torrent_files(torrent.hash)) == 1
     end
 
     test "handles torrent with no files", %{test_dir: test_dir} do
@@ -103,7 +103,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           path: "/file1.mp4",
           bytes: 100,
           selected: 1,
-          torrent_id: valid_torrent1.id,
+          torrent_hash: valid_torrent1.hash,
           inode_id: valid_file1.inode_id
         })
 
@@ -125,7 +125,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           path: "/file2.mp4",
           bytes: 200,
           selected: 1,
-          torrent_id: valid_torrent2.id,
+          torrent_hash: valid_torrent2.hash,
           inode_id: valid_file2.inode_id
         })
 
@@ -176,7 +176,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           path: "/video.mp4",
           bytes: 1000,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 

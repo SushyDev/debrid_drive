@@ -135,9 +135,7 @@ defmodule SyncEngine.Services.Poller do
         duration = System.monotonic_time(:millisecond) - start_time
         new_failures = state.consecutive_failures + 1
 
-        Logger.warning(
-          "#{__MODULE__} poll failed (attempt #{new_failures}/#{@max_failures}): #{inspect(reason)}"
-        )
+        Logger.warning("#{__MODULE__} poll failed (attempt #{new_failures}/#{@max_failures}): #{inspect(reason)}")
 
         # Emit telemetry for failed poll
         :telemetry.execute(
@@ -150,9 +148,7 @@ defmodule SyncEngine.Services.Poller do
         new_interval = calculate_backoff_interval(new_failures)
 
         if new_failures >= @max_failures do
-          Logger.error(
-            "#{__MODULE__} reached max failures (#{@max_failures}), using max backoff: #{new_interval}ms"
-          )
+          Logger.error("#{__MODULE__} reached max failures (#{@max_failures}), using max backoff: #{new_interval}ms")
         end
 
         new_state = %__MODULE__{
@@ -254,9 +250,7 @@ defmodule SyncEngine.Services.Poller do
       exception ->
         duration = System.monotonic_time(:millisecond) - start_time
 
-        Logger.error(
-          "#{__MODULE__} sync crashed after #{duration}ms: #{inspect(exception)}\n#{Exception.format_stacktrace()}"
-        )
+        Logger.error("#{__MODULE__} sync crashed after #{duration}ms: #{inspect(exception)}\n#{Exception.format_stacktrace()}")
 
         # Emit telemetry for crashed sync
         :telemetry.execute(
@@ -283,9 +277,26 @@ defmodule SyncEngine.Services.Poller do
                 node.inode_id
 
               {:error, reason} ->
-                Logger.error(
-                  "#{__MODULE__} failed to create #{container_name} directory: #{inspect(reason)}"
-                )
+                Logger.error("#{__MODULE__} failed to create #{container_name} directory: #{inspect(reason)}")
+
+                raise "Failed to create torrents root directory: #{inspect(reason)}"
+            end
+        end
+
+      %VFS.Inode{} = root ->
+        # Handle case where Repo.transact returns unwrapped result
+        case VFS.lookup(root.inode_id, container_name) do
+          {:ok, node} ->
+            node.inode_id
+
+          {:error, :not_found} ->
+            case VFS.create_directory(root.inode_id, container_name) do
+              {:ok, node} ->
+                Logger.info("#{__MODULE__} created #{container_name} directory")
+                node.inode_id
+
+              {:error, reason} ->
+                Logger.error("#{__MODULE__} failed to create #{container_name} directory: #{inspect(reason)}")
 
                 raise "Failed to create torrents root directory: #{inspect(reason)}"
             end

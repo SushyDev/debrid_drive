@@ -8,37 +8,37 @@ defmodule SyncEngine.Workers.DeletionWorker do
   ## Usage
 
       # Delete a single torrent
-      DeletionWorker.enqueue(123)
+      DeletionWorker.enqueue("abc123...")
 
       # Delete multiple torrents
-      DeletionWorker.enqueue_batch([1, 2, 3])
+      DeletionWorker.enqueue_batch(["abc123...", "def456..."])
   """
 
   @doc """
-  Enqueues a deletion job for a torrent.
+  Enqueues a deletion job for a torrent by hash.
 
   ## Examples
 
-      iex> DeletionWorker.enqueue(123)
+      iex> DeletionWorker.enqueue("abc123...")
       :ok
 
   """
-  def enqueue(torrent_id) when is_integer(torrent_id) do
-    SyncEngine.JobQueue.enqueue(:delete_torrent, %{torrent_id: torrent_id})
+  def enqueue(torrent_hash) when is_binary(torrent_hash) do
+    SyncEngine.JobQueue.enqueue(:delete_torrent, %{torrent_hash: torrent_hash})
   end
 
   @doc """
-  Enqueues deletion jobs for multiple torrents.
+  Enqueues deletion jobs for multiple torrents by hash.
 
   ## Examples
 
-      iex> DeletionWorker.enqueue_batch([1, 2, 3])
+      iex> DeletionWorker.enqueue_batch(["abc123...", "def456..."])
       :ok
 
   """
-  def enqueue_batch(torrent_ids) when is_list(torrent_ids) do
-    Enum.each(torrent_ids, fn torrent_id ->
-      enqueue(torrent_id)
+  def enqueue_batch(torrent_hashes) when is_list(torrent_hashes) do
+    Enum.each(torrent_hashes, fn torrent_hash ->
+      enqueue(torrent_hash)
     end)
 
     :ok

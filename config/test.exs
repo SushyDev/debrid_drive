@@ -26,17 +26,6 @@ if config_env() == :test do
     queue_interval: 1000
 end
 
-# Disable Oban queues in test environment
-config :sync_engine, Oban,
-  repo: VFS.Repo,
-  name: Oban,
-  notifier: Oban.Notifiers.PG,
-  # SQLite doesn't support table prefixes
-  prefix: false,
-  testing: :inline,
-  queues: false,
-  plugins: false
-
 # Use port 0 for gRPC server in tests to get random available port
 # This prevents port conflicts when running tests with dev server
 # Disable gRPC server and background services in tests to avoid Ecto.Sandbox ownership issues

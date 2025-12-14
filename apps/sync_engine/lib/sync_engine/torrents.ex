@@ -7,7 +7,6 @@ defmodule SyncEngine.Torrents do
 
   import Ecto.Query
   alias VFS.Repo
-  alias VFS.Node
   alias SyncEngine.Schemas.Torrent
   alias SyncEngine.Schemas.TorrentFile
   alias SyncEngine.Schemas.RejectedTorrent
@@ -94,11 +93,11 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Gets all files for a torrent.
+  Gets all files for a torrent by hash.
   """
-  def list_torrent_files(torrent_id) do
+  def list_torrent_files(torrent_hash) when is_binary(torrent_hash) do
     TorrentFile
-    |> where([f], f.torrent_id == ^torrent_id)
+    |> where([f], f.torrent_hash == ^torrent_hash)
     |> Repo.all()
   end
 
@@ -112,10 +111,10 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Gets a torrent file by torrent_id and rd_id.
+  Gets a torrent file by torrent_hash and rd_id.
   """
-  def get_torrent_file(torrent_id, rd_id) do
-    case Repo.get_by(TorrentFile, torrent_id: torrent_id, rd_id: rd_id) do
+  def get_torrent_file(torrent_hash, rd_id) when is_binary(torrent_hash) do
+    case Repo.get_by(TorrentFile, torrent_hash: torrent_hash, rd_id: rd_id) do
       nil -> {:error, :not_found}
       file -> {:ok, file}
     end
@@ -185,7 +184,9 @@ defmodule SyncEngine.Torrents do
   Checks if a torrent is rejected by its Real Debrid ID.
   """
   def torrent_rejected?(rd_id) do
-    Repo.exists?(from(r in RejectedTorrent, where: r.rd_id == ^rd_id))
+    RejectedTorrent
+    |> where([rejected_torrent], rejected_torrent.rd_id == ^rd_id)
+    |> Repo.exists?()
   end
 
   @doc """
@@ -245,11 +246,11 @@ defmodule SyncEngine.Torrents do
   # --- Deletion Operations ---
 
   @doc """
-  Marks a torrent for deletion.
+  Marks a torrent for deletion by hash.
   Sets deletion_status to "pending_deletion" and records the timestamp.
   """
-  def mark_for_deletion(torrent_id) when is_integer(torrent_id) do
-    case get_torrent(torrent_id) do
+  def mark_for_deletion(torrent_hash) when is_binary(torrent_hash) do
+    case get_torrent_by_hash(torrent_hash) do
       {:ok, torrent} ->
         torrent
         |> Ecto.Changeset.change(%{
@@ -264,16 +265,16 @@ defmodule SyncEngine.Torrents do
         end
 
       {:error, :not_found} ->
-        {:error, :torrent_not_found}
+        {:error, :not_found}
     end
   end
 
   @doc """
-  Queues a torrent deletion job.
-  Enqueues an Oban job to process the deletion asynchronously.
+  Queues a torrent deletion job by hash.
+  Enqueues a deletion worker job to process the deletion asynchronously.
   """
-  def queue_deletion(torrent_id) when is_integer(torrent_id) do
-    SyncEngine.Workers.DeletionWorker.enqueue(torrent_id)
+  def queue_deletion(torrent_hash) when is_binary(torrent_hash) do
+    SyncEngine.Workers.DeletionWorker.enqueue(torrent_hash)
   end
 
   @doc """
@@ -347,111 +348,104 @@ defmodule SyncEngine.Torrents do
   3. The torrent record
   4. The parent torrent directory (if empty)
   """
-  def cleanup_after_deletion(torrent_id, _opts \\ []) when is_integer(torrent_id) do
-    result =
-      Repo.transaction(fn ->
-        case get_torrent(torrent_id) do
-          {:ok, torrent} ->
-            # Preload files to find hardlinks pointing to them
-            torrent = Repo.preload(torrent, :files)
+  def cleanup_after_deletion(torrent_hash, _opts \\ []) when is_binary(torrent_hash) do
+    Repo.transact(fn ->
+      case get_torrent_by_hash(torrent_hash) do
+        {:ok, torrent} ->
+          # Get the parent directory inode_id (if exists)
+          parent_inode_id = torrent.inode_id
 
-            # Get the parent directory inode_id (if exists)
-            parent_inode_id = torrent.inode_id
+          # Get all torrent files by hash
+          torrent_files = list_torrent_files(torrent.hash)
 
-            # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
-            # The virtual inodes are being deleted, so hardlinks can't exist without them
-            Enum.each(torrent.files, fn torrent_file ->
-              # Find all directory entries pointing to inodes with this virtual_inode_id
-              # These are the hardlinks to this torrent file
-              hardlink_entries =
-                Repo.all(
-                  from(de in VFS.DirectoryEntry,
-                    join: i in VFS.Inode,
-                    on: de.inode_id == i.inode_id,
-                    where:
-                      i.virtual_inode_type == "torrent_file" and
-                        i.virtual_inode_id == ^torrent_file.id,
-                    select: de
-                  )
-                )
+          # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
+          # The virtual inodes are being deleted, so hardlinks can't exist without them
+          Enum.each(torrent_files, fn torrent_file ->
+            # Find all directory entries pointing to inodes with this virtual_inode_id
+            # These are the hardlinks to this torrent file
+            hardlink_entries =
+              VFS.DirectoryEntry
+              |> join(:inner, [directory_entry], inode in VFS.Inode, on: directory_entry.inode_id == inode.inode_id)
+              |> where([directory_entry, inode], inode.virtual_inode_type == "torrent_file")
+              |> where([directory_entry, inode], inode.virtual_inode_id == ^torrent_file.id)
+              |> select([directory_entry, _inode], directory_entry)
+              |> Repo.all()
 
-              # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
-              Enum.each(hardlink_entries, fn entry ->
-                case VFS.remove(entry.parent_inode_id, entry.name) do
-                  :ok -> :ok
-                  {:error, _} -> :ok
-                end
-              end)
-            end)
-
-            # Delete all torrent_file records (the virtual inodes)
-            from(f in TorrentFile, where: f.torrent_id == ^torrent_id)
-            |> Repo.delete_all()
-
-            # Delete the torrent record
-            Repo.delete!(torrent)
-
-            # Try to delete the parent directory if it's empty
-            if parent_inode_id do
-              case VFS.get_node(parent_inode_id) do
-                {:ok, inode} ->
-                  # Check if directory is empty
-                  children = VFS.list_children(inode.inode_id)
-
-                  if length(children) == 0 do
-                    # Delete empty torrent directory
-                    # Need to find the directory entry for this inode to delete it
-                    # Get the parent of this directory to call remove_entry
-                    case Repo.one(
-                           from(de in VFS.DirectoryEntry,
-                             where: de.inode_id == ^inode.inode_id,
-                             limit: 1
-                           )
-                         ) do
-                      %VFS.DirectoryEntry{} = entry ->
-                        try do
-                          VFS.remove(entry.parent_inode_id, entry.name)
-                          :ok
-                        rescue
-                          # Ignore errors, directory might be user-managed
-                          _ -> :ok
-                        end
-
-                      nil ->
-                        :ok
-                    end
-                  end
-
-                {:error, :not_found} ->
-                  # Inode already deleted, that's fine
-                  :ok
+            # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
+            Enum.each(hardlink_entries, fn entry ->
+              case VFS.remove(entry.parent_inode_id, entry.name) do
+                :ok -> :ok
+                {:error, _} -> :ok
               end
+            end)
+          end)
+
+          # Delete all torrent_file records (the virtual inodes)
+          TorrentFile
+          |> where([torrent_file], torrent_file.torrent_hash == ^torrent_hash)
+          |> Repo.delete_all()
+
+          # Delete the torrent record
+          Repo.delete!(torrent)
+
+          # Try to delete the parent directory if it's empty
+          if parent_inode_id do
+            case VFS.get_node(parent_inode_id) do
+              {:ok, inode} ->
+                # Check if directory is empty
+                children = VFS.list_children(inode.inode_id)
+
+                if length(children) == 0 do
+                  # Delete empty torrent directory
+                  # Need to find the directory entry for this inode to delete it
+                  # Get the parent of this directory to call remove_entry
+                  case VFS.DirectoryEntry
+                       |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
+                       |> limit(1)
+                       |> Repo.one() do
+                    %VFS.DirectoryEntry{} = entry ->
+                      try do
+                        VFS.remove(entry.parent_inode_id, entry.name)
+                        :ok
+                      rescue
+                        # Ignore errors, directory might be user-managed
+                        _ -> :ok
+                      end
+
+                    nil ->
+                      :ok
+                  end
+                end
+
+              {:error, :not_found} ->
+                # Inode already deleted, that's fine
+                :ok
             end
+          end
 
-            :ok
+          :ok
 
-          {:error, :not_found} ->
-            # Torrent already deleted, that's fine (idempotent)
-            :ok
-        end
-      end)
-
-    case result do
-      {:ok, _} -> :ok
+        {:error, :not_found} ->
+          # Torrent already deleted, that's fine (idempotent)
+          :ok
+      end
+    end)
+    |> case do
+      {:ok, :ok} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Batch deletes multiple torrents.
+  Batch deletes multiple torrents by hash.
   Marks all torrents for deletion and queues deletion jobs.
   """
-  def batch_delete(torrent_ids) when is_list(torrent_ids) do
+  def batch_delete(torrent_hashes) when is_list(torrent_hashes) do
     # Mark all torrents for deletion first
-    Enum.each(torrent_ids, &mark_for_deletion/1)
+    Enum.each(torrent_hashes, &mark_for_deletion/1)
 
     # Enqueue all deletion jobs in batch
-    SyncEngine.Workers.DeletionWorker.enqueue_batch(torrent_ids)
+    SyncEngine.Workers.DeletionWorker.enqueue_batch(torrent_hashes)
   end
 
   # --- Virtual Inode Hardlink Management ---
@@ -480,7 +474,7 @@ defmodule SyncEngine.Torrents do
   deletion decisions.
   """
   def decrement_hardlink_count(%TorrentFile{} = torrent_file) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Reload and lock the row for update within the transaction
       locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
 
@@ -493,10 +487,9 @@ defmodule SyncEngine.Torrents do
           # Now check if ALL files in the torrent have hardlink_count == 0
           # This query is atomic within the transaction
           query =
-            from(tf in TorrentFile,
-              where: tf.torrent_id == ^updated.torrent_id,
-              select: tf.hardlink_count
-            )
+            TorrentFile
+            |> where([torrent_file], torrent_file.torrent_hash == ^updated.torrent_hash)
+            |> select([torrent_file], torrent_file.hardlink_count)
 
           counts = Repo.all(query)
           should_delete = Enum.all?(counts, &(&1 == 0))

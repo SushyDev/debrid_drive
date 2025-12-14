@@ -26,17 +26,17 @@ defmodule VFS do
 
   defp get_root_with_retry(attempts_left) do
     try do
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         case Repo.get(Inode, 1) do
           nil ->
             # Root doesn't exist, create it
             case create_root() do
-              {:ok, root} -> root
+              {:ok, root} -> {:ok, root}
               {:error, changeset} -> Repo.rollback(changeset)
             end
 
           root ->
-            root
+            {:ok, root}
         end
       end)
     rescue
@@ -100,7 +100,7 @@ defmodule VFS do
     permissions = Keyword.get(opts, :mode, 0o755)
     mode = FileMode.directory_mode(permissions)
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Create inode
       {:ok, inode} =
         %Inode{}
@@ -121,7 +121,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
@@ -141,7 +141,7 @@ defmodule VFS do
     size = Keyword.get(opts, :size, if(data, do: byte_size(data), else: 0))
     content_type = Keyword.get(opts, :content_type, "application/octet-stream")
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Create inode
       {:ok, inode} =
         %Inode{}
@@ -164,7 +164,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
@@ -187,7 +187,7 @@ defmodule VFS do
     - `{:error, reason}` on failure
   """
   def create_hardlink(parent_inode_id, name, target_inode_id) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Get target inode
       target_inode = Repo.get!(Inode, target_inode_id)
 
@@ -208,9 +208,7 @@ defmodule VFS do
                 :ok
 
               error ->
-                Logger.error(
-                  "Cannot create hardlink: torrent_file #{target_inode.virtual_inode_id} not found"
-                )
+                Logger.error("Cannot create hardlink: torrent_file #{target_inode.virtual_inode_id} not found")
 
                 Repo.rollback(error)
             end
@@ -233,9 +231,7 @@ defmodule VFS do
                     :ok
 
                   {:error, reason} = error ->
-                    Logger.error(
-                      "Failed to increment external hardlink count for torrent_file #{target_inode.virtual_inode_id}: #{inspect(reason)}"
-                    )
+                    Logger.error("Failed to increment external hardlink count for torrent_file #{target_inode.virtual_inode_id}: #{inspect(reason)}")
 
                     Repo.rollback(error)
                 end
@@ -245,7 +241,7 @@ defmodule VFS do
             end
           end
 
-          updated_inode
+          {:ok, updated_inode}
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -259,12 +255,11 @@ defmodule VFS do
   """
   def lookup(parent_inode_id, name) do
     result =
-      from(de in DirectoryEntry,
-        where: de.parent_inode_id == ^parent_inode_id and de.name == ^name,
-        join: i in Inode,
-        on: de.inode_id == i.inode_id,
-        select: i
-      )
+      DirectoryEntry
+      |> where([directory_entry], directory_entry.parent_inode_id == ^parent_inode_id)
+      |> where([directory_entry], directory_entry.name == ^name)
+      |> join(:inner, [directory_entry], inode in Inode, on: directory_entry.inode_id == inode.inode_id)
+      |> select([_directory_entry, inode], inode)
       |> Repo.one()
 
     case result do
@@ -278,13 +273,11 @@ defmodule VFS do
   Returns a list of {directory_entry, inode} tuples.
   """
   def list_children(inode_id) do
-    from(de in DirectoryEntry,
-      where: de.parent_inode_id == ^inode_id,
-      join: i in Inode,
-      on: de.inode_id == i.inode_id,
-      order_by: de.name,
-      select: {de, i}
-    )
+    DirectoryEntry
+    |> where([directory_entry], directory_entry.parent_inode_id == ^inode_id)
+    |> join(:inner, [directory_entry], inode in Inode, on: directory_entry.inode_id == inode.inode_id)
+    |> order_by([directory_entry], directory_entry.name)
+    |> select([directory_entry, inode], {directory_entry, inode})
     |> Repo.all()
   end
 
@@ -322,22 +315,23 @@ defmodule VFS do
   Moves/renames a directory entry.
   """
   def move(parent_inode_id, old_name, new_parent_inode_id, new_name) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Find the directory entry
       entry =
-        Repo.one!(
-          from(de in DirectoryEntry,
-            where: de.parent_inode_id == ^parent_inode_id and de.name == ^old_name
-          )
-        )
+        DirectoryEntry
+        |> where([directory_entry], directory_entry.parent_inode_id == ^parent_inode_id)
+        |> where([directory_entry], directory_entry.name == ^old_name)
+        |> Repo.one!()
 
       # Update it
+      updated_entry =
       entry
       |> DirectoryEntry.changeset(%{
         parent_inode_id: new_parent_inode_id,
         name: new_name
       })
       |> Repo.update!()
+      {:ok, updated_entry}
     end)
   end
 
@@ -370,14 +364,13 @@ defmodule VFS do
     cascade = Keyword.get(opts, :cascade, true)
 
     result =
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         # Find directory entry
         entry =
-          Repo.one(
-            from(de in DirectoryEntry,
-              where: de.parent_inode_id == ^parent_inode_id and de.name == ^name
-            )
-          )
+          DirectoryEntry
+          |> where([directory_entry], directory_entry.parent_inode_id == ^parent_inode_id)
+          |> where([directory_entry], directory_entry.name == ^name)
+          |> Repo.one()
 
         if is_nil(entry) do
           Repo.rollback(:not_found)
@@ -388,12 +381,10 @@ defmodule VFS do
           # If directory, check if empty
           if FileMode.dir?(inode.mode) do
             children_count =
-              Repo.one(
-                from(de in DirectoryEntry,
-                  where: de.parent_inode_id == ^inode.inode_id,
-                  select: count(de.id)
-                )
-              )
+              DirectoryEntry
+              |> where([directory_entry], directory_entry.parent_inode_id == ^inode.inode_id)
+              |> select([directory_entry], count(directory_entry.id))
+              |> Repo.one()
 
             if children_count > 0 and not cascade do
               Repo.rollback(:directory_not_empty)
@@ -411,11 +402,11 @@ defmodule VFS do
               end
 
               # Delete this directory entry and decrement nlink
-              do_remove_entry(entry, inode)
+              {:ok, do_remove_entry(entry, inode)}
             end
           else
             # Regular file - just delete entry and decrement nlink
-            do_remove_entry(entry, inode)
+            {:ok, do_remove_entry(entry, inode)}
           end
         end
       end)
@@ -440,17 +431,19 @@ defmodule VFS do
       if inode.virtual_inode_type == "torrent_file" do
         case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
           {:ok, torrent_file} ->
-            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+            case SyncEngine.Torrents.decrement_hardlink_count(torrent_file) do
+              {:ok, _result} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning("Failed to decrement hardlink count for torrent_file #{inode.virtual_inode_id}: #{inspect(reason)}")
+            end
 
           {:error, :not_found} ->
-            Logger.warning(
-              "Torrent file #{inode.virtual_inode_id} not found when removing last hardlink to inode #{inode.inode_id}"
-            )
+            Logger.warning("Torrent file #{inode.virtual_inode_id} not found when removing last hardlink to inode #{inode.inode_id}")
 
           {:error, reason} ->
-            Logger.warning(
-              "Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}"
-            )
+            Logger.warning("Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}")
         end
       end
 
@@ -465,17 +458,19 @@ defmodule VFS do
       if inode.virtual_inode_type == "torrent_file" do
         case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
           {:ok, torrent_file} ->
-            SyncEngine.Torrents.decrement_hardlink_count(torrent_file)
+            case SyncEngine.Torrents.decrement_hardlink_count(torrent_file) do
+              {:ok, _result} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.warning("Failed to decrement hardlink count for torrent_file #{inode.virtual_inode_id}: #{inspect(reason)}")
+            end
 
           {:error, :not_found} ->
-            Logger.warning(
-              "Torrent file #{inode.virtual_inode_id} not found when removing hardlink to inode #{inode.inode_id}"
-            )
+            Logger.warning("Torrent file #{inode.virtual_inode_id} not found when removing hardlink to inode #{inode.inode_id}")
 
           {:error, reason} ->
-            Logger.warning(
-              "Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}"
-            )
+            Logger.warning("Failed to get torrent_file #{inode.virtual_inode_id} for hardlink count decrement: #{inspect(reason)}")
         end
       end
     end
@@ -489,12 +484,10 @@ defmodule VFS do
   def remove_by_id(inode_id, opts \\ []) do
     # Find any directory entry pointing to this inode
     entry =
-      Repo.one(
-        from(de in DirectoryEntry,
-          where: de.inode_id == ^inode_id,
-          limit: 1
-        )
-      )
+      DirectoryEntry
+      |> where([directory_entry], directory_entry.inode_id == ^inode_id)
+      |> limit(1)
+      |> Repo.one()
 
     case entry do
       nil -> {:error, :not_found}
@@ -518,13 +511,11 @@ defmodule VFS do
   Returns a list of {directory_entry, parent_inode} tuples.
   """
   def find_all_hardlinks_to_target(inode_id) do
-    from(de in DirectoryEntry,
-      where: de.inode_id == ^inode_id,
-      join: parent in Inode,
-      on: de.parent_inode_id == parent.inode_id,
-      order_by: de.name,
-      select: {de, parent}
-    )
+    DirectoryEntry
+    |> where([directory_entry], directory_entry.inode_id == ^inode_id)
+    |> join(:inner, [directory_entry], parent in Inode, on: directory_entry.parent_inode_id == parent.inode_id)
+    |> order_by([directory_entry], directory_entry.name)
+    |> select([directory_entry, parent], {directory_entry, parent})
     |> Repo.all()
   end
 
@@ -617,18 +608,16 @@ defmodule VFS do
   def create_hardlink_to_virtual_inode(parent_inode_id, name, virtual_inode_id, opts \\ []) do
     size = Keyword.get(opts, :size, 0)
 
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Check if virtual inode already exists
       # Note: SQLite doesn't support row-level locking (FOR UPDATE), so we rely on
       # the unique constraint to handle concurrent creation attempts gracefully
       existing_inode =
-        Repo.one(
-          from(i in Inode,
-            where:
-              i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id,
-            limit: 1
-          )
-        )
+        Inode
+        |> where([inode], inode.virtual_inode_type == "torrent_file")
+        |> where([inode], inode.virtual_inode_id == ^virtual_inode_id)
+        |> limit(1)
+        |> Repo.one()
 
       inode =
         case existing_inode do
@@ -646,9 +635,7 @@ defmodule VFS do
                  })
                  |> Repo.insert() do
               {:ok, new_inode} ->
-                Logger.debug(
-                  "Created new virtual inode #{new_inode.inode_id} for torrent_file #{virtual_inode_id}"
-                )
+                Logger.debug("Created new virtual inode #{new_inode.inode_id} for torrent_file #{virtual_inode_id}")
 
                 # Increment the external hardlink count on the torrent_file
                 case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
@@ -658,17 +645,13 @@ defmodule VFS do
                         :ok
 
                       {:error, reason} = error ->
-                        Logger.error(
-                          "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
-                        )
+                        Logger.error("Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}")
 
                         Repo.rollback(error)
                     end
 
                   {:error, reason} = error ->
-                    Logger.error(
-                      "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
-                    )
+                    Logger.error("Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}")
 
                     Repo.rollback(error)
                 end
@@ -681,23 +664,16 @@ defmodule VFS do
                      Keyword.has_key?(errors, :virtual_inode_type) do
                   # Race condition occurred - another transaction created the inode
                   # Retry the lookup (without lock since SQLite doesn't support FOR UPDATE)
-                  Logger.debug(
-                    "Detected concurrent creation of virtual inode for torrent_file #{virtual_inode_id}, retrying lookup"
-                  )
+                  Logger.debug("Detected concurrent creation of virtual inode for torrent_file #{virtual_inode_id}, retrying lookup")
 
-                  case Repo.one(
-                         from(i in Inode,
-                           where:
-                             i.virtual_inode_type == "torrent_file" and
-                               i.virtual_inode_id == ^virtual_inode_id,
-                           limit: 1
-                         )
-                       ) do
+                  case Inode
+                       |> where([inode], inode.virtual_inode_type == "torrent_file")
+                       |> where([inode], inode.virtual_inode_id == ^virtual_inode_id)
+                       |> limit(1)
+                       |> Repo.one() do
                     nil ->
                       # Still doesn't exist - this shouldn't happen
-                      Logger.error(
-                        "Virtual inode still not found after constraint violation for torrent_file #{virtual_inode_id}"
-                      )
+                      Logger.error("Virtual inode still not found after constraint violation for torrent_file #{virtual_inode_id}")
 
                       Repo.rollback({:error, :virtual_inode_not_found_after_conflict})
 
@@ -708,9 +684,7 @@ defmodule VFS do
                         |> Inode.increment_nlink()
                         |> Repo.update()
 
-                      Logger.debug(
-                        "Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id} (after race condition resolution)"
-                      )
+                      Logger.debug("Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id} (after race condition resolution)")
 
                       # Also increment the external hardlink count on the torrent_file
                       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
@@ -720,17 +694,13 @@ defmodule VFS do
                               :ok
 
                             {:error, reason} = error ->
-                              Logger.error(
-                                "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
-                              )
+                              Logger.error("Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}")
 
                               Repo.rollback(error)
                           end
 
                         {:error, reason} = error ->
-                          Logger.error(
-                            "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
-                          )
+                          Logger.error("Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}")
 
                           Repo.rollback(error)
                       end
@@ -739,9 +709,7 @@ defmodule VFS do
                   end
                 else
                   # Some other error
-                  Logger.error(
-                    "Failed to create virtual inode for torrent_file #{virtual_inode_id}: #{inspect(changeset)}"
-                  )
+                  Logger.error("Failed to create virtual inode for torrent_file #{virtual_inode_id}: #{inspect(changeset)}")
 
                   Repo.rollback({:error, changeset})
                 end
@@ -754,9 +722,7 @@ defmodule VFS do
               |> Inode.increment_nlink()
               |> Repo.update()
 
-            Logger.debug(
-              "Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id}"
-            )
+            Logger.debug("Incremented nlink to #{updated.nlink} for virtual inode #{updated.inode_id}")
 
             # Also increment the external hardlink count on the torrent_file
             case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
@@ -766,17 +732,13 @@ defmodule VFS do
                     :ok
 
                   {:error, reason} = error ->
-                    Logger.error(
-                      "Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}"
-                    )
+                    Logger.error("Failed to increment hardlink count for torrent_file #{virtual_inode_id}: #{inspect(reason)}")
 
                     Repo.rollback(error)
                 end
 
               {:error, reason} = error ->
-                Logger.error(
-                  "Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}"
-                )
+                Logger.error("Torrent file #{virtual_inode_id} not found when creating virtual inode hardlink: #{inspect(reason)}")
 
                 Repo.rollback(error)
             end
@@ -794,7 +756,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
@@ -802,13 +764,11 @@ defmodule VFS do
   Counts hardlinks pointing to a virtual inode.
   """
   def count_hardlinks_to_virtual_inode(virtual_inode_id) do
-    case Repo.one(
-           from(i in Inode,
-             where:
-               i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id,
-             select: i.nlink
-           )
-         ) do
+    case Inode
+         |> where([inode], inode.virtual_inode_type == "torrent_file")
+         |> where([inode], inode.virtual_inode_id == ^virtual_inode_id)
+         |> select([inode], inode.nlink)
+         |> Repo.one() do
       nil -> 0
       nlink -> nlink
     end
@@ -819,22 +779,19 @@ defmodule VFS do
   """
   def find_all_hardlinks_to_virtual_inode(virtual_inode_id) do
     inode =
-      Repo.one(
-        from(i in Inode,
-          where:
-            i.virtual_inode_type == "torrent_file" and i.virtual_inode_id == ^virtual_inode_id
-        )
-      )
+      Inode
+      |> where([inode], inode.virtual_inode_type == "torrent_file")
+      |> where([inode], inode.virtual_inode_id == ^virtual_inode_id)
+      |> Repo.one()
 
     case inode do
       nil ->
         []
 
       inode ->
-        from(de in DirectoryEntry,
-          where: de.inode_id == ^inode.inode_id,
-          order_by: de.name
-        )
+        DirectoryEntry
+        |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
+        |> order_by([directory_entry], directory_entry.name)
         |> Repo.all()
     end
   end

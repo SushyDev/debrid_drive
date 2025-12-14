@@ -40,9 +40,7 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
 
     # Create directory_entries table - maps names to inodes (like directory entries)
     create table(:directory_entries) do
-      add(:parent_inode_id, references(:inodes, column: :inode_id, on_delete: :delete_all),
-        null: false
-      )
+      add(:parent_inode_id, references(:inodes, column: :inode_id, on_delete: :delete_all), null: false)
 
       add(:name, :string, null: false)
       add(:inode_id, references(:inodes, column: :inode_id, on_delete: :restrict), null: false)
@@ -175,7 +173,7 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
   # ============================================================================
 
   defp migrate_data_up do
-    VFS.Repo.transaction(
+    VFS.Repo.transact(
       fn ->
         # Create temporary mapping tables
         VFS.Repo.query!("""
@@ -435,9 +433,7 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
           IO.puts("WARNING: #{broken_count_value} broken POSIX hardlinks skipped:")
 
           Enum.each(broken.rows, fn row ->
-            IO.puts(
-              "  Node #{Enum.at(row, 0)}: #{Enum.at(row, 2)} -> target #{Enum.at(row, 3)} (#{Enum.at(row, 4)})"
-            )
+            IO.puts("  Node #{Enum.at(row, 0)}: #{Enum.at(row, 2)} -> target #{Enum.at(row, 3)} (#{Enum.at(row, 4)})")
           end)
         end
 
@@ -448,9 +444,7 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
         IO.puts("Migration complete:")
         IO.puts("  - Inodes created: #{inode_count.rows |> List.first() |> List.first()}")
 
-        IO.puts(
-          "  - Directory entries created: #{entry_count.rows |> List.first() |> List.first()}"
-        )
+        IO.puts("  - Directory entries created: #{entry_count.rows |> List.first() |> List.first()}")
 
         # Verify nlink integrity
         nlink_check =
