@@ -70,7 +70,7 @@ defmodule SyncEngine.TorrentFileTest do
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 
@@ -95,7 +95,7 @@ defmodule SyncEngine.TorrentFileTest do
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           inode_id: file_node.inode_id
         })
 
