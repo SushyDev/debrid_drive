@@ -189,7 +189,7 @@ defmodule SyncEngine.Services.TorrentSync do
                # 3. Add files (using pre-fetched torrent_info)
                {:ok, _files} <-
                  add_torrent_files(torrent, torrent_node, torrent_info.files, torrent_info.links) do
-            torrent
+            {:ok, torrent}
           else
             {:error, reason} = error ->
               Logger.error("Failed to add torrent #{rd_torrent.id}: #{inspect(reason)}")

@@ -469,6 +469,8 @@ defmodule VFS.Repo.Migrations.CreateInodeSystem do
         # NOTE: We do NOT drop the temp tables here because they're needed for
         # the foreign key migration that happens after columns are added in up/0.
         # Temp tables will be dropped explicitly in cleanup_migration_data/0.
+
+        {:ok, :migration_complete}
       end,
       timeout: :infinity
     )

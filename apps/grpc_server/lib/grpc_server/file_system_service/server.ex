@@ -209,7 +209,7 @@ defmodule GrpcServer.FileSystemService.Server do
                 enqueue_torrent_deletion_on_remove(virtual_inode)
               end
 
-              :ok
+              {:ok, :ok}
 
             error ->
               VFS.Repo.rollback(error)
@@ -218,7 +218,7 @@ defmodule GrpcServer.FileSystemService.Server do
         {:error, :not_found} ->
           # Virtual inode already deleted, just remove the orphaned link
           case VFS.remove(parent_id, name, cascade: false) do
-            :ok -> :ok
+            :ok -> {:ok, :ok}
             error -> VFS.Repo.rollback(error)
           end
       end
