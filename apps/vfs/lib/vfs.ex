@@ -31,12 +31,12 @@ defmodule VFS do
           nil ->
             # Root doesn't exist, create it
             case create_root() do
-              {:ok, root} -> root
+              {:ok, root} -> {:ok, root}
               {:error, changeset} -> Repo.rollback(changeset)
             end
 
           root ->
-            root
+            {:ok, root}
         end
       end)
     rescue
@@ -121,7 +121,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
@@ -164,7 +164,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
@@ -241,7 +241,7 @@ defmodule VFS do
             end
           end
 
-          updated_inode
+          {:ok, updated_inode}
 
         {:error, changeset} ->
           Repo.rollback(changeset)
@@ -324,12 +324,14 @@ defmodule VFS do
         |> Repo.one!()
 
       # Update it
+      updated_entry =
       entry
       |> DirectoryEntry.changeset(%{
         parent_inode_id: new_parent_inode_id,
         name: new_name
       })
       |> Repo.update!()
+      {:ok, updated_entry}
     end)
   end
 
@@ -400,11 +402,11 @@ defmodule VFS do
               end
 
               # Delete this directory entry and decrement nlink
-              do_remove_entry(entry, inode)
+              {:ok, do_remove_entry(entry, inode)}
             end
           else
             # Regular file - just delete entry and decrement nlink
-            do_remove_entry(entry, inode)
+            {:ok, do_remove_entry(entry, inode)}
           end
         end
       end)
@@ -754,7 +756,7 @@ defmodule VFS do
         })
         |> Repo.insert()
 
-      inode
+      {:ok, inode}
     end)
   end
 
