@@ -15,7 +15,7 @@ defmodule SyncEngine.JobQueue do
   ## Usage
 
       # Enqueue a deletion
-      SyncEngine.JobQueue.enqueue(:delete_torrent, %{torrent_id: 123})
+      SyncEngine.JobQueue.enqueue(:delete_torrent, %{torrent_hash: "abc123..."})
 
       # Get queue status
       SyncEngine.JobQueue.status()
@@ -43,7 +43,7 @@ defmodule SyncEngine.JobQueue do
 
   ## Examples
 
-      JobQueue.enqueue(:delete_torrent, %{torrent_id: 123})
+      JobQueue.enqueue(:delete_torrent, %{torrent_hash: "abc123..."})
       JobQueue.enqueue(:add_torrent, %{rd_torrent: torrent_data, torrents_root_id: 1})
   """
   def enqueue(job_type, args) when is_atom(job_type) and is_map(args) do
@@ -146,7 +146,7 @@ defmodule SyncEngine.JobQueue do
     pending_deletions = SyncEngine.Torrents.list_pending_deletions()
 
     Enum.each(pending_deletions, fn torrent ->
-      enqueue(:delete_torrent, %{torrent_id: torrent.id})
+      enqueue(:delete_torrent, %{torrent_hash: torrent.hash})
     end)
 
     if length(pending_deletions) > 0 do
@@ -239,9 +239,7 @@ defmodule SyncEngine.JobQueue do
     queue_length = :queue.len(state.queue)
 
     if queue_length > 0 do
-      Logger.warning(
-        "#{__MODULE__} shutting down with #{queue_length} pending jobs - they will be recovered on restart"
-      )
+      Logger.warning("#{__MODULE__} shutting down with #{queue_length} pending jobs - they will be recovered on restart")
     end
 
     Logger.info("#{__MODULE__} terminated gracefully")
@@ -250,10 +248,10 @@ defmodule SyncEngine.JobQueue do
 
   ## Private Functions
 
-  defp process_job(%{type: :delete_torrent, args: %{torrent_id: torrent_id}}) do
-    Logger.info("#{__MODULE__} processing deletion for torrent_id=#{torrent_id}")
+  defp process_job(%{type: :delete_torrent, args: %{torrent_hash: torrent_hash}}) do
+    Logger.info("#{__MODULE__} processing deletion for torrent_hash=#{torrent_hash}")
 
-    case SyncEngine.Torrents.get_torrent(torrent_id) do
+    case SyncEngine.Torrents.get_torrent_by_hash(torrent_hash) do
       {:ok, torrent} ->
         client = SyncEngine.RealDebridClient.get_client()
 
@@ -263,24 +261,22 @@ defmodule SyncEngine.JobQueue do
         case result do
           :ok ->
             Logger.info("#{__MODULE__} deleted torrent #{torrent.rd_id} from API")
-            SyncEngine.Torrents.cleanup_after_deletion(torrent_id, cascade_hardlinks: true)
+            SyncEngine.Torrents.cleanup_after_deletion(torrent_hash, cascade_hardlinks: true)
 
           {:error, "Not found"} ->
             # Already deleted, just cleanup
             Logger.info("#{__MODULE__} torrent #{torrent.rd_id} already deleted, cleaning up")
-            SyncEngine.Torrents.cleanup_after_deletion(torrent_id, cascade_hardlinks: true)
+            SyncEngine.Torrents.cleanup_after_deletion(torrent_hash, cascade_hardlinks: true)
 
           {:error, reason} ->
-            Logger.error(
-              "#{__MODULE__} failed to delete torrent #{torrent.rd_id}: #{inspect(reason)}"
-            )
+            Logger.error("#{__MODULE__} failed to delete torrent #{torrent.rd_id}: #{inspect(reason)}")
 
             SyncEngine.Torrents.record_deletion_attempt(torrent, {:error, reason})
             {:error, reason}
         end
 
       {:error, :not_found} ->
-        Logger.info("#{__MODULE__} torrent_id=#{torrent_id} not found, already deleted")
+        Logger.info("#{__MODULE__} torrent_hash=#{torrent_hash} not found, already deleted")
         :ok
     end
   end
@@ -301,9 +297,7 @@ defmodule SyncEngine.JobQueue do
       retry_count = job.retry_count + 1
       delay = calculate_retry_delay(retry_count)
 
-      Logger.warning(
-        "#{__MODULE__} job failed (attempt #{retry_count}/#{@max_retries}), retrying in #{delay}ms: #{inspect(reason)}"
-      )
+      Logger.warning("#{__MODULE__} job failed (attempt #{retry_count}/#{@max_retries}), retrying in #{delay}ms: #{inspect(reason)}")
 
       # Re-enqueue with updated retry count
       retry_job = %{job | retry_count: retry_count}
@@ -318,9 +312,7 @@ defmodule SyncEngine.JobQueue do
       |> Map.delete(:current_task)
     else
       # Max retries exceeded
-      Logger.error(
-        "#{__MODULE__} job failed after #{@max_retries} attempts, giving up: #{inspect(reason)}"
-      )
+      Logger.error("#{__MODULE__} job failed after #{@max_retries} attempts, giving up: #{inspect(reason)}")
 
       # record_deletion_attempt already marks as failed after max attempts
       # so we don't need to do it again here

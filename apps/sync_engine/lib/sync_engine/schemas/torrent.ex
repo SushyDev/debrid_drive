@@ -4,8 +4,6 @@ defmodule SyncEngine.Schemas.Torrent do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  alias VFS.Node
-  alias SyncEngine.Schemas.TorrentFile
 
   schema "torrents" do
     # Real Debrid fields
@@ -33,7 +31,8 @@ defmodule SyncEngine.Schemas.Torrent do
     # Relationships
     # Reference to the directory inode in VFS
     field(:inode_id, :integer)
-    has_many(:files, TorrentFile, on_delete: :delete_all)
+    # Note: files relationship removed - query by torrent_hash instead
+    # TorrentFiles now reference torrents by hash, not by ID
 
     timestamps()
   end

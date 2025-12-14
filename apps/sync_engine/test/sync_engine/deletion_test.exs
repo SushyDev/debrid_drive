@@ -106,10 +106,10 @@ defmodule SyncEngine.DeletionTest do
     test "queues deletion worker job", %{root: root} do
       {torrent, _torrent_dir, _file_node, _torrent_file} = create_torrent_fixture(root)
 
-      # Queue deletion (enqueues Oban job)
+      # Queue deletion via DeletionWorker
       assert :ok = SyncEngine.Torrents.queue_deletion(torrent.id)
 
-      # Verify Oban job was enqueued
+      # Verify deletion job was enqueued
       # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{torrent_id: torrent.id}
     end
   end

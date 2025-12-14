@@ -232,7 +232,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Enqueue torrent deletion when last hardlink is removed
   defp enqueue_torrent_deletion_on_remove(virtual_inode) do
-    case SyncEngine.Torrents.get_torrent(virtual_inode.torrent_id) do
+    case SyncEngine.Torrents.get_torrent_by_hash(virtual_inode.torrent_hash) do
       {:ok, torrent} ->
         Logger.info(
           "All hardlinks removed for torrent #{torrent.rd_id}, " <>
@@ -240,7 +240,7 @@ defmodule GrpcServer.FileSystemService.Server do
         )
 
         # Queue deletion job
-        SyncEngine.Workers.DeletionWorker.enqueue(torrent.id)
+        SyncEngine.Workers.DeletionWorker.enqueue(torrent.hash)
         :ok
 
       {:error, :not_found} ->
@@ -566,9 +566,7 @@ defmodule GrpcServer.FileSystemService.Server do
   # Only virtual inodes can be streamed
   defp resolve_to_torrent_file(inode) do
     if inode.virtual_inode_type == "torrent_file" and inode.virtual_inode_id do
-      Logger.info(
-        "resolve_to_torrent_file: resolving virtual inode #{inode.inode_id} -> torrent_file #{inode.virtual_inode_id}"
-      )
+      Logger.info("resolve_to_torrent_file: resolving virtual inode #{inode.inode_id} -> torrent_file #{inode.virtual_inode_id}")
 
       case SyncEngine.Torrents.get_torrent_file_by_id(inode.virtual_inode_id) do
         {:ok, torrent_file} ->

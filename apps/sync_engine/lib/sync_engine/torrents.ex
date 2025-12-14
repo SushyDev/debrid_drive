@@ -7,7 +7,6 @@ defmodule SyncEngine.Torrents do
 
   import Ecto.Query
   alias VFS.Repo
-  alias VFS.Node
   alias SyncEngine.Schemas.Torrent
   alias SyncEngine.Schemas.TorrentFile
   alias SyncEngine.Schemas.RejectedTorrent
@@ -94,11 +93,11 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Gets all files for a torrent.
+  Gets all files for a torrent by hash.
   """
-  def list_torrent_files(torrent_id) do
+  def list_torrent_files(torrent_hash) when is_binary(torrent_hash) do
     TorrentFile
-    |> where([f], f.torrent_id == ^torrent_id)
+    |> where([f], f.torrent_hash == ^torrent_hash)
     |> Repo.all()
   end
 
@@ -112,10 +111,10 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Gets a torrent file by torrent_id and rd_id.
+  Gets a torrent file by torrent_hash and rd_id.
   """
-  def get_torrent_file(torrent_id, rd_id) do
-    case Repo.get_by(TorrentFile, torrent_id: torrent_id, rd_id: rd_id) do
+  def get_torrent_file(torrent_hash, rd_id) when is_binary(torrent_hash) do
+    case Repo.get_by(TorrentFile, torrent_hash: torrent_hash, rd_id: rd_id) do
       nil -> {:error, :not_found}
       file -> {:ok, file}
     end
@@ -247,11 +246,11 @@ defmodule SyncEngine.Torrents do
   # --- Deletion Operations ---
 
   @doc """
-  Marks a torrent for deletion.
+  Marks a torrent for deletion by hash.
   Sets deletion_status to "pending_deletion" and records the timestamp.
   """
-  def mark_for_deletion(torrent_id) when is_integer(torrent_id) do
-    case get_torrent(torrent_id) do
+  def mark_for_deletion(torrent_hash) when is_binary(torrent_hash) do
+    case get_torrent_by_hash(torrent_hash) do
       {:ok, torrent} ->
         torrent
         |> Ecto.Changeset.change(%{
@@ -271,11 +270,11 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Queues a torrent deletion job.
-  Enqueues an Oban job to process the deletion asynchronously.
+  Queues a torrent deletion job by hash.
+  Enqueues a deletion worker job to process the deletion asynchronously.
   """
-  def queue_deletion(torrent_id) when is_integer(torrent_id) do
-    SyncEngine.Workers.DeletionWorker.enqueue(torrent_id)
+  def queue_deletion(torrent_hash) when is_binary(torrent_hash) do
+    SyncEngine.Workers.DeletionWorker.enqueue(torrent_hash)
   end
 
   @doc """
@@ -349,19 +348,19 @@ defmodule SyncEngine.Torrents do
   3. The torrent record
   4. The parent torrent directory (if empty)
   """
-  def cleanup_after_deletion(torrent_id, _opts \\ []) when is_integer(torrent_id) do
+  def cleanup_after_deletion(torrent_hash, _opts \\ []) when is_binary(torrent_hash) do
     Repo.transact(fn ->
-      case get_torrent(torrent_id) do
+      case get_torrent_by_hash(torrent_hash) do
         {:ok, torrent} ->
-          # Preload files to find hardlinks pointing to them
-          torrent = Repo.preload(torrent, :files)
-
           # Get the parent directory inode_id (if exists)
           parent_inode_id = torrent.inode_id
 
+          # Get all torrent files by hash
+          torrent_files = list_torrent_files(torrent.hash)
+
           # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
           # The virtual inodes are being deleted, so hardlinks can't exist without them
-          Enum.each(torrent.files, fn torrent_file ->
+          Enum.each(torrent_files, fn torrent_file ->
             # Find all directory entries pointing to inodes with this virtual_inode_id
             # These are the hardlinks to this torrent file
             hardlink_entries =
@@ -383,7 +382,7 @@ defmodule SyncEngine.Torrents do
 
           # Delete all torrent_file records (the virtual inodes)
           TorrentFile
-          |> where([torrent_file], torrent_file.torrent_id == ^torrent_id)
+          |> where([torrent_file], torrent_file.torrent_hash == ^torrent_hash)
           |> Repo.delete_all()
 
           # Delete the torrent record
@@ -438,15 +437,15 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Batch deletes multiple torrents.
+  Batch deletes multiple torrents by hash.
   Marks all torrents for deletion and queues deletion jobs.
   """
-  def batch_delete(torrent_ids) when is_list(torrent_ids) do
+  def batch_delete(torrent_hashes) when is_list(torrent_hashes) do
     # Mark all torrents for deletion first
-    Enum.each(torrent_ids, &mark_for_deletion/1)
+    Enum.each(torrent_hashes, &mark_for_deletion/1)
 
     # Enqueue all deletion jobs in batch
-    SyncEngine.Workers.DeletionWorker.enqueue_batch(torrent_ids)
+    SyncEngine.Workers.DeletionWorker.enqueue_batch(torrent_hashes)
   end
 
   # --- Virtual Inode Hardlink Management ---
@@ -489,7 +488,7 @@ defmodule SyncEngine.Torrents do
           # This query is atomic within the transaction
           query =
             TorrentFile
-            |> where([torrent_file], torrent_file.torrent_id == ^updated.torrent_id)
+            |> where([torrent_file], torrent_file.torrent_hash == ^updated.torrent_hash)
             |> select([torrent_file], torrent_file.hardlink_count)
 
           counts = Repo.all(query)
