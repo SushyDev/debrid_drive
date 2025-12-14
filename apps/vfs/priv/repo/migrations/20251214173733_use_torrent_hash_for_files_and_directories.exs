@@ -1,17 +1,26 @@
-defmodule VFS.Repo.Migrations.UseTorrentHashInsteadOfId do
+defmodule VFS.Repo.Migrations.UseTorrentHashForFilesAndDirectories do
   @moduledoc """
-  Migration to use torrent hash instead of torrent ID for binding torrent files.
+  Migration to use torrent hash instead of torrent ID for binding torrent files
+  and rename torrent directories to use hash.
 
   This makes the system more resilient to torrent ID changes when torrents are
   removed and re-added to Real-Debrid, since the hash remains constant.
 
   Changes:
   1. Recreate torrent_files table with torrent_hash instead of torrent_id
-  2. Preserve all existing data during the migration
+  2. Rename torrent directories from rd_id to hash
+  3. Preserve all existing data during the migration
   """
   use Ecto.Migration
 
+  import Ecto.Query
+  alias VFS.Repo
+
   def up do
+    # ============================================================================
+    # PART 1: Update torrent_files table to use torrent_hash
+    # ============================================================================
+
     # SQLite doesn't support dropping constraints, so we need to recreate the table
     # First, create a new table with the correct schema
     create table(:torrent_files_new) do
@@ -57,9 +66,91 @@ defmodule VFS.Repo.Migrations.UseTorrentHashInsteadOfId do
     create(index(:torrent_files, [:torrent_hash]))
     create(index(:torrent_files, [:inode_id]))
     create(index(:torrent_files, [:link_expires_at]))
+
+    # ============================================================================
+    # PART 2: Rename torrent directories from rd_id to hash
+    # ============================================================================
+
+    # Get all torrents with their directory entries
+    torrents_with_dirs =
+      from(t in "torrents",
+        join: i in "inodes",
+        on: t.inode_id == i.inode_id,
+        join: de in "directory_entries",
+        on: de.inode_id == i.inode_id,
+        select: %{
+          torrent_id: t.id,
+          rd_id: t.rd_id,
+          hash: t.hash,
+          inode_id: t.inode_id,
+          dir_entry_id: de.id,
+          current_name: de.name,
+          parent_inode_id: de.parent_inode_id
+        }
+      )
+      |> Repo.all()
+
+    # Rename each directory from rd_id to hash
+    Enum.each(torrents_with_dirs, fn torrent ->
+      if torrent.current_name == torrent.rd_id do
+        # Update the directory entry name to use hash
+        execute("""
+        UPDATE directory_entries
+        SET name = '#{torrent.hash}'
+        WHERE id = #{torrent.dir_entry_id}
+        """)
+
+        IO.puts("Renamed torrent directory: #{torrent.rd_id} -> #{torrent.hash}")
+      else
+        IO.puts("Skipping torrent #{torrent.rd_id} - directory name '#{torrent.current_name}' doesn't match rd_id")
+      end
+    end)
   end
 
   def down do
+    # ============================================================================
+    # PART 1: Rename directories back from hash to rd_id
+    # ============================================================================
+
+    # Get all torrents with their directory entries
+    torrents_with_dirs =
+      from(t in "torrents",
+        join: i in "inodes",
+        on: t.inode_id == i.inode_id,
+        join: de in "directory_entries",
+        on: de.inode_id == i.inode_id,
+        select: %{
+          torrent_id: t.id,
+          rd_id: t.rd_id,
+          hash: t.hash,
+          inode_id: t.inode_id,
+          dir_entry_id: de.id,
+          current_name: de.name,
+          parent_inode_id: de.parent_inode_id
+        }
+      )
+      |> Repo.all()
+
+    # Rename directories back from hash to rd_id
+    Enum.each(torrents_with_dirs, fn torrent ->
+      if torrent.current_name == torrent.hash do
+        # Update the directory entry name back to rd_id
+        execute("""
+        UPDATE directory_entries
+        SET name = '#{torrent.rd_id}'
+        WHERE id = #{torrent.dir_entry_id}
+        """)
+
+        IO.puts("Renamed torrent directory back: #{torrent.hash} -> #{torrent.rd_id}")
+      else
+        IO.puts("Skipping torrent #{torrent.rd_id} - directory name '#{torrent.current_name}' doesn't match hash")
+      end
+    end)
+
+    # ============================================================================
+    # PART 2: Revert torrent_files table to use torrent_id
+    # ============================================================================
+
     # Recreate with torrent_id
     create table(:torrent_files_new) do
       add(:rd_id, :integer, null: false)
