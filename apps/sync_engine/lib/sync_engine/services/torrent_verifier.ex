@@ -185,17 +185,17 @@ defmodule SyncEngine.Services.TorrentVerifier do
             # Also try to remove the VFS directory
             case VFS.remove_by_id(torrent.inode_id) do
               :ok ->
-                :ok
+                {:ok, :ok}
 
               {:error, :not_found} ->
                 # Directory already gone, that's fine
-                :ok
+                {:ok, :ok}
 
               {:error, reason} ->
                 Logger.warning("Failed to remove VFS directory for torrent #{torrent.rd_id}: #{inspect(reason)}")
 
                 # Still consider it successful since the torrent is deleted
-                :ok
+                {:ok, :ok}
             end
 
           {:error, reason} ->

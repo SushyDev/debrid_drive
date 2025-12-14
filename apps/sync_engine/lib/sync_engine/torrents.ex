@@ -423,11 +423,11 @@ defmodule SyncEngine.Torrents do
             end
           end
 
-          :ok
+          {:ok, :ok}
 
         {:error, :not_found} ->
           # Torrent already deleted, that's fine (idempotent)
-          :ok
+          {:ok, :ok}
       end
     end)
     |> case do
@@ -494,7 +494,7 @@ defmodule SyncEngine.Torrents do
           counts = Repo.all(query)
           should_delete = Enum.all?(counts, &(&1 == 0))
 
-          {new_count, should_delete}
+          {:ok, {new_count, should_delete}}
 
         {:error, reason} ->
           Repo.rollback(reason)
