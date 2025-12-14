@@ -2,7 +2,6 @@ defmodule SyncEngine.JobQueue do
   @moduledoc """
   A simple GenServer-based job queue for asynchronous torrent operations.
 
-  Replaces Oban with a lighter-weight solution that:
   - Processes jobs sequentially to avoid SQLite contention
   - Retries failed jobs with exponential backoff
   - Works with the rate-limited RealDebrid client

@@ -182,7 +182,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
 
   defp remove_empty_torrent(%Torrent{} = torrent) do
     result =
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         # Delete the torrent (will cascade to files)
         case Torrents.delete_torrent(torrent) do
           {:ok, _} ->

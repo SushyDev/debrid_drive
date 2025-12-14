@@ -126,11 +126,8 @@ defmodule GrpcServer.E2E.DeletionTest do
       movies: movies,
       file_node: _file_node
     } do
-
       request = %RemoveRequest{parent_node_id: movies.inode_id, name: "movie.mkv"}
       assert %RemoveResponse{} = Server.remove(request, nil)
-
-
     end
 
     @tag :sync_engine
@@ -185,7 +182,6 @@ defmodule GrpcServer.E2E.DeletionTest do
 
       request = %RemoveRequest{parent_node_id: root.inode_id, name: "parent"}
       assert %RemoveResponse{} = Server.remove(request, nil)
-
     end
   end
 
@@ -208,7 +204,6 @@ defmodule GrpcServer.E2E.DeletionTest do
 
       request = %RemoveRequest{parent_node_id: root.inode_id, name: "movies"}
       assert %RemoveResponse{} = Server.remove(request, nil)
-
     end
 
     @tag :sync_engine
@@ -247,7 +242,6 @@ defmodule GrpcServer.E2E.DeletionTest do
       # Delete movies directory (which contains the target)
       request = %RemoveRequest{parent_node_id: root.inode_id, name: "movies"}
       assert %RemoveResponse{} = Server.remove(request, nil)
-
     end
   end
 

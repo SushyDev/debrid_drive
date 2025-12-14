@@ -163,7 +163,7 @@ defmodule SyncEngine.Services.TorrentSync do
          :ok <- validate_torrent(torrent_info) do
       # Now run the database transaction with pre-fetched data
       result =
-        Repo.transaction(fn ->
+        Repo.transact(fn ->
           # 1. Create VFS directory node for the torrent
           dir_name = format_torrent_directory_name(rd_torrent)
 

@@ -153,8 +153,8 @@ defmodule VFS.Inode do
   @doc """
   Returns true if this is a regular file inode.
   """
-  def file?(inode) do
-    FileMode.file?(inode.mode)
+  def regular?(inode) do
+    FileMode.regular?(inode.mode)
   end
 
   @doc """

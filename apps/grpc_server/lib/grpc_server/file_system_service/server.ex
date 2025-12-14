@@ -195,7 +195,7 @@ defmodule GrpcServer.FileSystemService.Server do
   # Handle virtual inode removal with reference counting
   # The VFS.remove function now handles nlink decrement automatically
   defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
-    VFS.Repo.transaction(fn ->
+    VFS.Repo.transact(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
         {:ok, virtual_inode} ->
           # Check if this is the last link before removing
@@ -357,13 +357,11 @@ defmodule GrpcServer.FileSystemService.Server do
   # Helper to get any name for an inode (for cases where we don't have the directory entry context)
   # Returns a name if found, or "(deleted)" if the inode has no directory entries
   defp get_any_name_for_inode(inode_id) do
-    case VFS.Repo.one(
-           from(de in VFS.DirectoryEntry,
-             where: de.inode_id == ^inode_id,
-             limit: 1,
-             select: de.name
-           )
-         ) do
+    case VFS.DirectoryEntry
+         |> where([directory_entry], directory_entry.inode_id == ^inode_id)
+         |> limit(1)
+         |> select([directory_entry], directory_entry.name)
+         |> VFS.Repo.one() do
       nil -> "(deleted)"
       name -> name
     end

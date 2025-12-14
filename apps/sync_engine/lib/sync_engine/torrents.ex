@@ -185,7 +185,9 @@ defmodule SyncEngine.Torrents do
   Checks if a torrent is rejected by its Real Debrid ID.
   """
   def torrent_rejected?(rd_id) do
-    Repo.exists?(from(r in RejectedTorrent, where: r.rd_id == ^rd_id))
+    RejectedTorrent
+    |> where([rejected_torrent], rejected_torrent.rd_id == ^rd_id)
+    |> Repo.exists?()
   end
 
   @doc """
@@ -349,7 +351,7 @@ defmodule SyncEngine.Torrents do
   """
   def cleanup_after_deletion(torrent_id, _opts \\ []) when is_integer(torrent_id) do
     result =
-      Repo.transaction(fn ->
+      Repo.transact(fn ->
         case get_torrent(torrent_id) do
           {:ok, torrent} ->
             # Preload files to find hardlinks pointing to them
@@ -364,16 +366,12 @@ defmodule SyncEngine.Torrents do
               # Find all directory entries pointing to inodes with this virtual_inode_id
               # These are the hardlinks to this torrent file
               hardlink_entries =
-                Repo.all(
-                  from(de in VFS.DirectoryEntry,
-                    join: i in VFS.Inode,
-                    on: de.inode_id == i.inode_id,
-                    where:
-                      i.virtual_inode_type == "torrent_file" and
-                        i.virtual_inode_id == ^torrent_file.id,
-                    select: de
-                  )
-                )
+                VFS.DirectoryEntry
+                |> join(:inner, [directory_entry], inode in VFS.Inode, on: directory_entry.inode_id == inode.inode_id)
+                |> where([directory_entry, inode], inode.virtual_inode_type == "torrent_file")
+                |> where([directory_entry, inode], inode.virtual_inode_id == ^torrent_file.id)
+                |> select([directory_entry, _inode], directory_entry)
+                |> Repo.all()
 
               # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
               Enum.each(hardlink_entries, fn entry ->
@@ -385,7 +383,8 @@ defmodule SyncEngine.Torrents do
             end)
 
             # Delete all torrent_file records (the virtual inodes)
-            from(f in TorrentFile, where: f.torrent_id == ^torrent_id)
+            TorrentFile
+            |> where([torrent_file], torrent_file.torrent_id == ^torrent_id)
             |> Repo.delete_all()
 
             # Delete the torrent record
@@ -402,12 +401,10 @@ defmodule SyncEngine.Torrents do
                     # Delete empty torrent directory
                     # Need to find the directory entry for this inode to delete it
                     # Get the parent of this directory to call remove_entry
-                    case Repo.one(
-                           from(de in VFS.DirectoryEntry,
-                             where: de.inode_id == ^inode.inode_id,
-                             limit: 1
-                           )
-                         ) do
+                    case VFS.DirectoryEntry
+                         |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
+                         |> limit(1)
+                         |> Repo.one() do
                       %VFS.DirectoryEntry{} = entry ->
                         try do
                           VFS.remove(entry.parent_inode_id, entry.name)
@@ -480,7 +477,7 @@ defmodule SyncEngine.Torrents do
   deletion decisions.
   """
   def decrement_hardlink_count(%TorrentFile{} = torrent_file) do
-    Repo.transaction(fn ->
+    Repo.transact(fn ->
       # Reload and lock the row for update within the transaction
       locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
 
@@ -493,10 +490,9 @@ defmodule SyncEngine.Torrents do
           # Now check if ALL files in the torrent have hardlink_count == 0
           # This query is atomic within the transaction
           query =
-            from(tf in TorrentFile,
-              where: tf.torrent_id == ^updated.torrent_id,
-              select: tf.hardlink_count
-            )
+            TorrentFile
+            |> where([torrent_file], torrent_file.torrent_id == ^updated.torrent_id)
+            |> select([torrent_file], torrent_file.hardlink_count)
 
           counts = Repo.all(query)
           should_delete = Enum.all?(counts, &(&1 == 0))
