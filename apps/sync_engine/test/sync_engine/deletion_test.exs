@@ -132,9 +132,9 @@ defmodule SyncEngine.DeletionTest do
       {:ok, hardlink_node2} =
         VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "file2.mkv", torrent_file2.id)
 
-      # Reload to get the actual torrent_files
-      torrent = Repo.preload(torrent, :files, force: true)
-      [_tf1, _tf2] = torrent.files
+      # Verify we have the torrent files
+      torrent_files = Repo.all(from(tf in TorrentFile, where: tf.torrent_hash == ^torrent.hash))
+      assert length(torrent_files) == 2
 
       # Simulate successful API deletion
       # Now clean up VFS

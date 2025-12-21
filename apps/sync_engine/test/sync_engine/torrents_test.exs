@@ -176,7 +176,7 @@ defmodule SyncEngine.TorrentsTest do
       assert length(files) == 1
     end
 
-    test "delete_torrent cascades to files", %{torrent: torrent, file_node: file_node} do
+    test "delete_torrent requires manual cleanup for files", %{torrent: torrent, file_node: file_node} do
       {:ok, _} =
         Torrents.create_torrent_file(%{
           rd_id: 1,
@@ -188,7 +188,15 @@ defmodule SyncEngine.TorrentsTest do
         })
 
       assert length(Torrents.list_torrent_files(torrent.hash)) == 1
+
+      # Delete torrent (files remain since we switched from torrent_id FK to torrent_hash)
       {:ok, _} = Torrents.delete_torrent(torrent)
+
+      # Files are still there - cleanup is now manual via cleanup_after_deletion
+      assert length(Torrents.list_torrent_files(torrent.hash)) == 1
+
+      # Clean up manually
+      :ok = Torrents.cleanup_after_deletion(torrent.hash)
       assert length(Torrents.list_torrent_files(torrent.hash)) == 0
     end
 

@@ -49,7 +49,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
          # Create a torrent_file (virtual inode)
          {:ok, torrent_file} <-
            VFS.Repo.insert(%TorrentFile{
-             torrent_id: torrent.id,
+             torrent_hash: torrent.hash,
              rd_id: 1,
              path: "/#{filename}",
              bytes: 5_000_000,
@@ -457,7 +457,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
       # Create a torrent_file (virtual inode)
       {:ok, torrent_file} =
         VFS.Repo.insert(%TorrentFile{
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           rd_id: 1,
           path: "/video.mkv",
           bytes: 5_000_000,

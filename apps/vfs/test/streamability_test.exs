@@ -65,7 +65,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: nil,
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           node_id: nil,
           hardlink_count: 1
         })
@@ -91,7 +91,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download/streamable_file",
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           node_id: nil,
           hardlink_count: 1
         })
@@ -118,7 +118,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download/preloaded_file",
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           node_id: nil,
           hardlink_count: 1
         })
@@ -147,7 +147,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download",
-          torrent_id: torrent.id
+          torrent_hash: torrent.hash
         })
 
       assert Streamability.virtual_inode_streamable?(virtual_inode)
@@ -161,7 +161,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: nil,
-          torrent_id: torrent.id
+          torrent_hash: torrent.hash
         })
 
       refute Streamability.virtual_inode_streamable?(virtual_inode)
@@ -206,7 +206,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/file1",
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           hardlink_count: 1
         })
 
@@ -241,7 +241,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/shared",
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           hardlink_count: 3
         })
 
@@ -283,7 +283,7 @@ defmodule VFS.StreamabilityTest do
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/idempotent",
-          torrent_id: torrent.id,
+          torrent_hash: torrent.hash,
           hardlink_count: 1
         })
 

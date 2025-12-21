@@ -350,85 +350,87 @@ defmodule SyncEngine.Torrents do
   """
   def cleanup_after_deletion(torrent_hash, _opts \\ []) when is_binary(torrent_hash) do
     Repo.transact(fn ->
-      case get_torrent_by_hash(torrent_hash) do
-        {:ok, torrent} ->
-          # Get the parent directory inode_id (if exists)
-          parent_inode_id = torrent.inode_id
+      # Get the torrent (might not exist if already deleted)
+      torrent_result = get_torrent_by_hash(torrent_hash)
 
-          # Get all torrent files by hash
-          torrent_files = list_torrent_files(torrent.hash)
+      parent_inode_id =
+        case torrent_result do
+          {:ok, torrent} -> torrent.inode_id
+          {:error, :not_found} -> nil
+        end
 
-          # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
-          # The virtual inodes are being deleted, so hardlinks can't exist without them
-          Enum.each(torrent_files, fn torrent_file ->
-            # Find all directory entries pointing to inodes with this virtual_inode_id
-            # These are the hardlinks to this torrent file
-            hardlink_entries =
-              VFS.DirectoryEntry
-              |> join(:inner, [directory_entry], inode in VFS.Inode, on: directory_entry.inode_id == inode.inode_id)
-              |> where([directory_entry, inode], inode.virtual_inode_type == "torrent_file")
-              |> where([directory_entry, inode], inode.virtual_inode_id == ^torrent_file.id)
-              |> select([directory_entry, _inode], directory_entry)
-              |> Repo.all()
+      # Get all torrent files by hash
+      torrent_files = list_torrent_files(torrent_hash)
 
-            # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
-            Enum.each(hardlink_entries, fn entry ->
-              case VFS.remove(entry.parent_inode_id, entry.name) do
-                :ok -> :ok
-                {:error, _} -> :ok
-              end
-            end)
-          end)
+      # Delete all directory entries (hardlinks) pointing to this torrent's virtual inode files
+      # The virtual inodes are being deleted, so hardlinks can't exist without them
+      Enum.each(torrent_files, fn torrent_file ->
+        # Find all directory entries pointing to inodes with this virtual_inode_id
+        # These are the hardlinks to this torrent file
+        hardlink_entries =
+          VFS.DirectoryEntry
+          |> join(:inner, [directory_entry], inode in VFS.Inode, on: directory_entry.inode_id == inode.inode_id)
+          |> where([directory_entry, inode], inode.virtual_inode_type == "torrent_file")
+          |> where([directory_entry, inode], inode.virtual_inode_id == ^torrent_file.id)
+          |> select([directory_entry, _inode], directory_entry)
+          |> Repo.all()
 
-          # Delete all torrent_file records (the virtual inodes)
-          TorrentFile
-          |> where([torrent_file], torrent_file.torrent_hash == ^torrent_hash)
-          |> Repo.delete_all()
-
-          # Delete the torrent record
-          Repo.delete!(torrent)
-
-          # Try to delete the parent directory if it's empty
-          if parent_inode_id do
-            case VFS.get_node(parent_inode_id) do
-              {:ok, inode} ->
-                # Check if directory is empty
-                children = VFS.list_children(inode.inode_id)
-
-                if length(children) == 0 do
-                  # Delete empty torrent directory
-                  # Need to find the directory entry for this inode to delete it
-                  # Get the parent of this directory to call remove_entry
-                  case VFS.DirectoryEntry
-                       |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
-                       |> limit(1)
-                       |> Repo.one() do
-                    %VFS.DirectoryEntry{} = entry ->
-                      try do
-                        VFS.remove(entry.parent_inode_id, entry.name)
-                        :ok
-                      rescue
-                        # Ignore errors, directory might be user-managed
-                        _ -> :ok
-                      end
-
-                    nil ->
-                      :ok
-                  end
-                end
-
-              {:error, :not_found} ->
-                # Inode already deleted, that's fine
-                :ok
-            end
+        # Delete each hardlink entry (this will decrement nlink and delete inode if nlink reaches 0)
+        Enum.each(hardlink_entries, fn entry ->
+          case VFS.remove(entry.parent_inode_id, entry.name) do
+            :ok -> :ok
+            {:error, _} -> :ok
           end
+        end)
+      end)
 
-          {:ok, :ok}
+      # Delete all torrent_file records (the virtual inodes)
+      TorrentFile
+      |> where([torrent_file], torrent_file.torrent_hash == ^torrent_hash)
+      |> Repo.delete_all()
 
-        {:error, :not_found} ->
-          # Torrent already deleted, that's fine (idempotent)
-          {:ok, :ok}
+      # Delete the torrent record (if it still exists)
+      case torrent_result do
+        {:ok, torrent} -> Repo.delete!(torrent)
+        {:error, :not_found} -> :ok
       end
+
+      # Try to delete the parent directory if it's empty
+      if parent_inode_id do
+        case VFS.get_node(parent_inode_id) do
+          {:ok, inode} ->
+            # Check if directory is empty
+            children = VFS.list_children(inode.inode_id)
+
+            if length(children) == 0 do
+              # Delete empty torrent directory
+              # Need to find the directory entry for this inode to delete it
+              # Get the parent of this directory to call remove_entry
+              case VFS.DirectoryEntry
+                   |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
+                   |> limit(1)
+                   |> Repo.one() do
+                %VFS.DirectoryEntry{} = entry ->
+                  try do
+                    VFS.remove(entry.parent_inode_id, entry.name)
+                    :ok
+                  rescue
+                    # Ignore errors, directory might be user-managed
+                    _ -> :ok
+                  end
+
+                nil ->
+                  :ok
+              end
+            end
+
+          {:error, :not_found} ->
+            # Inode already deleted, that's fine
+            :ok
+        end
+      end
+
+      {:ok, :ok}
     end)
     |> case do
       {:ok, :ok} -> :ok
