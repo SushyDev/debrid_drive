@@ -164,11 +164,20 @@ defmodule SyncEngine.Services.TorrentSync do
       # Now run the database transaction with pre-fetched data
       result =
         Repo.transact(fn ->
-          # 1. Create VFS directory node for the torrent
+          # 1. Create VFS directory node for the torrent (or get existing)
           dir_name = format_torrent_directory_name(rd_torrent)
 
-          with {:ok, torrent_node} <-
-                 VFS.create_directory(torrents_root_id, dir_name),
+          torrent_node_result =
+            case VFS.lookup(torrents_root_id, dir_name) do
+              {:ok, existing_node} ->
+                Logger.debug("Reusing existing directory for torrent #{rd_torrent.id}: #{dir_name}")
+                {:ok, existing_node}
+
+              {:error, :not_found} ->
+                VFS.create_directory(torrents_root_id, dir_name)
+            end
+
+          with {:ok, torrent_node} <- torrent_node_result,
                # 2. Create torrent record
                {:ok, torrent} <-
                  SyncEngine.Torrents.create_torrent(%{

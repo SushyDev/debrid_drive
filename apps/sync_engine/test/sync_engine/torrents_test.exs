@@ -296,6 +296,95 @@ defmodule SyncEngine.TorrentsTest do
       # NOW all files are at 0
       assert should_delete2 == true
     end
+
+    test "create_torrent_file/1 merges on conflict with conditional upsert (torrent_hash + rd_id)", %{torrent: torrent} do
+      # Create initial file
+      attrs1 = %{
+        rd_id: 10,
+        path: "/original.mkv",
+        bytes: 1_000_000,
+        selected: 1,
+        torrent_hash: torrent.hash,
+        inode_id: nil,
+        link: "https://real-debrid.com/link_old"
+      }
+
+      assert {:ok, file1} = Torrents.create_torrent_file(attrs1)
+      assert file1.link == "https://real-debrid.com/link_old"
+      assert file1.path == "/original.mkv"
+      original_updated_at = file1.updated_at
+
+      # Wait a moment to ensure different timestamp
+      Process.sleep(10)
+
+      # Insert same torrent_hash + rd_id with different data (merge with newer timestamp)
+      attrs2 = %{
+        rd_id: 10,
+        path: "/updated.mkv",
+        bytes: 2_000_000,
+        selected: 1,
+        torrent_hash: torrent.hash,
+        inode_id: nil,
+        link: "https://real-debrid.com/link_new"
+      }
+
+      # This should merge: keep existing record but update fields with newer timestamp
+      assert {:ok, file2} = Torrents.create_torrent_file(attrs2)
+      assert file2.link == "https://real-debrid.com/link_new"
+      assert file2.path == "/updated.mkv"
+      assert file2.bytes == 2_000_000
+      # Verify the updated_at timestamp is newer or equal (merge updates timestamp)
+      assert file2.updated_at >= original_updated_at
+
+      # Verify only one record exists with this torrent_hash + rd_id combination
+      files = Torrents.list_torrent_files(torrent.hash)
+      matching_files = Enum.filter(files, fn f -> f.rd_id == 10 end)
+      assert length(matching_files) == 1
+      assert hd(matching_files).link == "https://real-debrid.com/link_new"
+    end
+
+    test "create_torrent_file/1 allows multiple different files under same hash", %{torrent: torrent} do
+      # Scenario: Add same torrent hash, but select different files each time
+      # First: add file1 (rd_id=100)
+      attrs1 = %{
+        rd_id: 100,
+        path: "/file1.mkv",
+        bytes: 1_000_000,
+        selected: 1,
+        torrent_hash: torrent.hash,
+        link: "https://real-debrid.com/link1"
+      }
+
+      assert {:ok, file1} = Torrents.create_torrent_file(attrs1)
+      assert file1.rd_id == 100
+      assert file1.path == "/file1.mkv"
+
+      # Second: add file2 (rd_id=200) - different file, same hash
+      attrs2 = %{
+        rd_id: 200,
+        path: "/file2.mkv",
+        bytes: 2_000_000,
+        selected: 1,
+        torrent_hash: torrent.hash,
+        link: "https://real-debrid.com/link2"
+      }
+
+      assert {:ok, file2} = Torrents.create_torrent_file(attrs2)
+      assert file2.rd_id == 200
+      assert file2.path == "/file2.mkv"
+
+      # Verify both files exist under the same hash
+      files = Torrents.list_torrent_files(torrent.hash)
+      assert length(files) == 2
+
+      file1_from_db = Enum.find(files, fn f -> f.rd_id == 100 end)
+      file2_from_db = Enum.find(files, fn f -> f.rd_id == 200 end)
+
+      assert file1_from_db != nil
+      assert file1_from_db.path == "/file1.mkv"
+      assert file2_from_db != nil
+      assert file2_from_db.path == "/file2.mkv"
+    end
   end
 
   describe "rejected_torrents" do
