@@ -194,7 +194,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Handle virtual inode removal with reference counting
   # The VFS.remove function now handles nlink decrement automatically
-  defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
+  defp handle_virtual_inode_remove(_inode, virtual_inode_id, parent_id, name) do
     VFS.Repo.transact(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
         {:ok, torrent_file} ->
@@ -567,7 +567,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Gets the cached download URL if valid, otherwise fetches a new one from Real Debrid
   defp get_or_fetch_download_url(torrent_file) do
-    if SyncEngine.Schemas.TorrentFile.link_valid?(torrent_file) do
+    if TorrentFile.link_valid?(torrent_file) do
       {:ok, torrent_file.download_link}
     else
       fetch_and_cache_download_url(torrent_file)
@@ -583,7 +583,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
     with {:ok, response} <- RealDebrid.Api.UnrestrictLink.unrestrict(client, torrent_file.link),
          changeset <-
-           SyncEngine.Schemas.TorrentFile.cache_link_changeset(torrent_file, response.download),
+           TorrentFile.cache_link_changeset(torrent_file, response.download),
          {:ok, updated_file} <- SyncEngine.Torrents.update_torrent_file(changeset) do
       {:ok, updated_file.download_link}
     else

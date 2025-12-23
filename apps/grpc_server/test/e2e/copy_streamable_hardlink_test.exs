@@ -18,7 +18,6 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
   import GrpcServer.Test.GrpcClientHelper
 
   alias VFS
-  alias VFS.FileMode
   alias SyncEngine.Schemas.{Torrent, TorrentFile}
 
   setup do
@@ -36,7 +35,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
   end
 
   # Helper to create a streamable virtual inode with a hardlink
-  defp create_streamable_file(root_id, filename, size \\ 5_000_000_000) do
+  defp create_streamable_file(root_id, filename, size) do
     # Create a torrent
     {:ok, torrent} =
       VFS.Repo.insert(%Torrent{

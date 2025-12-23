@@ -60,6 +60,9 @@ defmodule VFS.Streamability do
 
   alias VFS.{Inode, Repo}
 
+  # Suppress warnings for SyncEngine module references (circular dependency at compile time, resolved at runtime)
+  @compile {:no_warn_undefined, SyncEngine.Torrents}
+
   @doc """
   Determines if an inode is streamable.
 

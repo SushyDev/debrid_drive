@@ -11,7 +11,9 @@ defmodule VFS do
   alias VFS.Inode
   alias VFS.DirectoryEntry
   alias VFS.FileMode
-  alias SyncEngine.Schemas.Torrent
+
+  # Suppress warnings for SyncEngine module references (circular dependency at compile time, resolved at runtime)
+  @compile {:no_warn_undefined, SyncEngine.Torrents}
 
   @doc """
   Gets the root inode (inode_id=1).
@@ -325,12 +327,13 @@ defmodule VFS do
 
       # Update it
       updated_entry =
-      entry
-      |> DirectoryEntry.changeset(%{
-        parent_inode_id: new_parent_inode_id,
-        name: new_name
-      })
-      |> Repo.update!()
+        entry
+        |> DirectoryEntry.changeset(%{
+          parent_inode_id: new_parent_inode_id,
+          name: new_name
+        })
+        |> Repo.update!()
+
       {:ok, updated_entry}
     end)
   end
