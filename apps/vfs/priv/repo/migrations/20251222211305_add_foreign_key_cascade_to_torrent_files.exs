@@ -12,6 +12,10 @@ defmodule VFS.Repo.Migrations.AddForeignKeyCascadeToTorrentFiles do
     # Add trigger to cascade delete torrent_files when torrent is deleted
     # SQLite doesn't support foreign keys on non-primary key columns easily,
     # so we use a trigger instead
+
+    # Make idempotent - drop if exists first
+    execute("DROP TRIGGER IF EXISTS delete_torrent_files_on_torrent_delete")
+
     execute("""
     CREATE TRIGGER delete_torrent_files_on_torrent_delete
     BEFORE DELETE ON torrents

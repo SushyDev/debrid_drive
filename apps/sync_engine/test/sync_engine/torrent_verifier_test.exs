@@ -40,6 +40,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 1000,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 
@@ -104,6 +105,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 100,
           selected: 1,
           torrent_hash: valid_torrent1.hash,
+          torrent_rd_id: valid_torrent1.rd_id,
           inode_id: valid_file1.inode_id
         })
 
@@ -126,6 +128,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 200,
           selected: 1,
           torrent_hash: valid_torrent2.hash,
+          torrent_rd_id: valid_torrent2.rd_id,
           inode_id: valid_file2.inode_id
         })
 
@@ -177,6 +180,7 @@ defmodule SyncEngine.TorrentVerifierTest do
           bytes: 1000,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 

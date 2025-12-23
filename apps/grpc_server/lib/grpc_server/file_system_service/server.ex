@@ -197,17 +197,18 @@ defmodule GrpcServer.FileSystemService.Server do
   defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
     VFS.Repo.transact(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
-        {:ok, virtual_inode} ->
-          # Check if this is the last link before removing
-          should_delete_torrent = inode.nlink == 1
+        {:ok, torrent_file} ->
+          # Store torrent_rd_id before removal for potential deletion
+          torrent_rd_id = torrent_file.torrent_rd_id
 
-          # Remove the directory entry (VFS handles nlink decrement)
+          # Remove the directory entry (VFS handles nlink decrement and calls decrement_hardlink_count)
           case VFS.remove(parent_id, name, cascade: false) do
             :ok ->
-              # If this was the last hardlink, enqueue torrent deletion
-              if should_delete_torrent do
-                enqueue_torrent_deletion_on_remove(virtual_inode)
-              end
+              # Check if all files in this torrent instance have zero hardlinks
+              SyncEngine.Services.DeletionPolicy.maybe_enqueue_deletion(
+                torrent_file.torrent_hash,
+                torrent_rd_id
+              )
 
               {:ok, :ok}
 
@@ -230,23 +231,10 @@ defmodule GrpcServer.FileSystemService.Server do
     end
   end
 
-  # Enqueue torrent deletion when last hardlink is removed
-  defp enqueue_torrent_deletion_on_remove(virtual_inode) do
-    case SyncEngine.Torrents.get_torrent_by_hash(virtual_inode.torrent_hash) do
-      {:ok, torrent} ->
-        Logger.info(
-          "All hardlinks removed for torrent #{torrent.rd_id}, " <>
-            "enqueueing deletion from RealDebrid"
-        )
-
-        # Queue deletion job
-        SyncEngine.Workers.DeletionWorker.enqueue(torrent.hash)
-        :ok
-
-      {:error, :not_found} ->
-        # Torrent already deleted
-        :ok
-    end
+  # Check if all files in a torrent instance have zero hardlinks
+  # Delegated to DeletionPolicy module for consistency
+  defp check_should_delete_torrent(torrent_hash, torrent_rd_id) do
+    SyncEngine.Services.DeletionPolicy.should_delete_torrent?(torrent_hash, torrent_rd_id)
   end
 
   @doc """

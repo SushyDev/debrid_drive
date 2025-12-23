@@ -57,7 +57,8 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
     # Create a torrent_file (virtual inode) with a link (streamable)
     {:ok, torrent_file} =
       VFS.Repo.insert(%TorrentFile{
-        torrent_id: torrent.id,
+        torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         rd_id: 1,
         path: "/#{filename}",
         bytes: size,

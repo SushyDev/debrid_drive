@@ -75,6 +75,7 @@ defmodule SyncEngine.DeletionTest do
     {:ok, torrent_file} =
       Repo.insert(%TorrentFile{
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         rd_id: 1,
         path: "/movie.mkv",
         bytes: bytes,
@@ -94,8 +95,8 @@ defmodule SyncEngine.DeletionTest do
       # Create a complete torrent fixture
       {torrent, _torrent_dir, _file_node, _torrent_file} = create_torrent_fixture(root)
 
-      # Mark torrent for deletion
-      assert :ok = SyncEngine.Torrents.mark_for_deletion(torrent.hash)
+      # Mark torrent for deletion using rd_id
+      assert :ok = SyncEngine.Torrents.mark_for_deletion(torrent.rd_id)
 
       # Verify status changed
       updated_torrent = Repo.get(Torrent, torrent.id)
@@ -106,11 +107,11 @@ defmodule SyncEngine.DeletionTest do
     test "queues deletion worker job", %{root: root} do
       {torrent, _torrent_dir, _file_node, _torrent_file} = create_torrent_fixture(root)
 
-      # Queue deletion via DeletionWorker
-      assert :ok = SyncEngine.Torrents.queue_deletion(torrent.hash)
+      # Queue deletion via DeletionWorker using rd_id
+      assert :ok = SyncEngine.Torrents.queue_deletion(torrent.rd_id)
 
       # Verify deletion job was enqueued
-      # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{torrent_hash: torrent.hash}
+      # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{rd_id: torrent.rd_id}
     end
   end
 
@@ -123,6 +124,7 @@ defmodule SyncEngine.DeletionTest do
       {:ok, torrent_file2} =
         Repo.insert(%TorrentFile{
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           rd_id: 2,
           path: "/file2.mkv",
           bytes: 2_000_000,
@@ -132,13 +134,13 @@ defmodule SyncEngine.DeletionTest do
       {:ok, hardlink_node2} =
         VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "file2.mkv", torrent_file2.id)
 
-      # Reload to get the actual torrent_files
-      torrent = Repo.preload(torrent, :files, force: true)
-      [_tf1, _tf2] = torrent.files
+      # Get torrent files by hash (no association, query by hash instead)
+      torrent_files = SyncEngine.Torrents.list_torrent_files(torrent.hash)
+      [_tf1, _tf2] = torrent_files
 
       # Simulate successful API deletion
-      # Now clean up VFS
-      assert :ok = SyncEngine.Torrents.cleanup_after_deletion(torrent.hash)
+      # Now clean up VFS using rd_id
+      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
 
       # Verify hardlink VFS nodes are removed
       assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
@@ -276,9 +278,9 @@ defmodule SyncEngine.DeletionTest do
       {:ok, external_hardlink} =
         VFS.create_hardlink_to_virtual_inode(root.inode_id, "favorite.mkv", torrent_file.id)
 
-      # Clean up after deletion
+      # Clean up after deletion using rd_id
       # This should delete all hardlinks pointing to torrent files
-      assert :ok = SyncEngine.Torrents.cleanup_after_deletion(torrent.hash)
+      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
 
       # All hardlinks should be deleted
       assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
@@ -292,7 +294,7 @@ defmodule SyncEngine.DeletionTest do
   describe "performance and batching" do
     test "batch deletes multiple torrents efficiently", %{root: root} do
       # Create multiple torrents using fixture
-      torrent_hashes =
+      rd_ids =
         for i <- 1..10 do
           {torrent, _torrent_dir, _file_node, _torrent_file} =
             create_torrent_fixture(root,
@@ -301,15 +303,15 @@ defmodule SyncEngine.DeletionTest do
               filename: "Batch #{i}"
             )
 
-          torrent.hash
+          torrent.rd_id
         end
 
-      # Batch delete - this will mark and queue all deletions
-      assert :ok = SyncEngine.Torrents.batch_delete(torrent_hashes)
+      # Batch delete using rd_ids - this will mark and queue all deletions
+      assert :ok = SyncEngine.Torrents.batch_delete(rd_ids)
 
       # Verify all torrents are marked for deletion
-      for hash <- torrent_hashes do
-        torrent = Repo.get_by(Torrent, hash: hash)
+      for rd_id <- rd_ids do
+        {:ok, torrent} = SyncEngine.Torrents.get_torrent_by_rd_id(rd_id)
         assert torrent.deletion_status == "pending_deletion"
       end
 
@@ -317,13 +319,13 @@ defmodule SyncEngine.DeletionTest do
       # SyncEngine.JobQueue.clear()
 
       # Manually cleanup (simulating successful API deletion)
-      for hash <- torrent_hashes do
-        SyncEngine.Torrents.cleanup_after_deletion(hash)
+      for rd_id <- rd_ids do
+        SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(rd_id)
       end
 
       # Verify all torrents are gone
-      for hash <- torrent_hashes do
-        assert Repo.get_by(Torrent, hash: hash) == nil
+      for rd_id <- rd_ids do
+        assert {:error, :not_found} = SyncEngine.Torrents.get_torrent_by_rd_id(rd_id)
       end
     end
   end
