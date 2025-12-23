@@ -231,12 +231,6 @@ defmodule GrpcServer.FileSystemService.Server do
     end
   end
 
-  # Check if all files in a torrent instance have zero hardlinks
-  # Delegated to DeletionPolicy module for consistency
-  defp check_should_delete_torrent(torrent_hash, torrent_rd_id) do
-    SyncEngine.Services.DeletionPolicy.should_delete_torrent?(torrent_hash, torrent_rd_id)
-  end
-
   @doc """
   Renames/moves a node.
   """

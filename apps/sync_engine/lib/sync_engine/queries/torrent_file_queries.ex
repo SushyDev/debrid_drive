@@ -50,14 +50,21 @@ defmodule SyncEngine.Queries.TorrentFileQueries do
 
   This indicates that all user-visible references to the torrent's files
   have been removed, and the torrent can be safely deleted from Real-Debrid.
+
+  Returns false if no files exist (empty torrent or already deleted).
   """
   def all_hardlinks_zero?(hash, torrent_rd_id) do
-    TorrentFile
-    |> where([f], f.torrent_hash == ^hash)
-    |> where([f], f.torrent_rd_id == ^torrent_rd_id)
-    |> select([f], f.hardlink_count)
-    |> Repo.all()
-    |> Enum.all?(&(&1 == 0))
+    hardlink_counts =
+      TorrentFile
+      |> where([f], f.torrent_hash == ^hash)
+      |> where([f], f.torrent_rd_id == ^torrent_rd_id)
+      |> select([f], f.hardlink_count)
+      |> Repo.all()
+
+    case hardlink_counts do
+      [] -> false
+      counts -> Enum.all?(counts, &(&1 == 0))
+    end
   end
 
   @doc """

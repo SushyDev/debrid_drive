@@ -17,6 +17,8 @@ defmodule SyncEngine.Services.InodeManager do
   1. When adding a duplicate file (merge + upsert)
   2. When deleting a torrent and updating remaining files to point to next most recent
 
+  Skips the update if the inode already points to the most recent file (optimization).
+
   Returns:
   - `{:ok, updated_inode}` if successful
   - `{:error, :no_files_found}` if no torrent_files exist for this hash/path
@@ -30,7 +32,14 @@ defmodule SyncEngine.Services.InodeManager do
         {:error, :no_files_found}
 
       most_recent_file ->
-        update_inode_to_file(inode, most_recent_file)
+        # Skip update if inode already points to the most recent file
+        if inode.virtual_inode_id == most_recent_file.id do
+          Logger.debug("VFS inode #{inode.inode_id} already points to most recent torrent_file #{most_recent_file.id}; skipping update")
+
+          {:ok, inode}
+        else
+          update_inode_to_file(inode, most_recent_file)
+        end
     end
   end
 

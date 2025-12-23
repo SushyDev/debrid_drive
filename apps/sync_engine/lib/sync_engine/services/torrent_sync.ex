@@ -39,14 +39,13 @@ defmodule SyncEngine.Services.TorrentSync do
     verify = Keyword.get(opts, :verify, true)
 
     with {:ok, rd_torrents} <- fetch_rd_torrents(client),
-         {:ok, {db_torrents, db_hashes, rejected_torrents}} <- fetch_db_torrents() do
+         {:ok, {db_torrents, rejected_torrents}} <- fetch_db_torrents() do
       # Compare and sync
       result =
         perform_sync(
           client,
           rd_torrents,
           db_torrents,
-          db_hashes,
           rejected_torrents,
           torrents_root_id
         )
@@ -91,16 +90,14 @@ defmodule SyncEngine.Services.TorrentSync do
 
   defp fetch_db_torrents do
     torrents = SyncEngine.Torrents.get_torrents_by_rd_id()
-    hashes = SyncEngine.Torrents.get_torrents_by_hash()
     rejected = SyncEngine.Torrents.get_rejected_torrents_by_rd_id()
-    {:ok, {torrents, hashes, rejected}}
+    {:ok, {torrents, rejected}}
   end
 
   defp perform_sync(
          client,
          rd_torrents,
          db_torrents,
-         _db_hashes,
          rejected_torrents,
          torrents_root_id
        ) do
@@ -340,6 +337,9 @@ defmodule SyncEngine.Services.TorrentSync do
          link
        ) do
     # File already exists - this is the merge + upsert case
+    # Get the old torrent_file that this inode currently points to (if any)
+    old_torrent_file_id = existing_inode.virtual_inode_id
+
     # Create the new torrent_file record for this torrent instance
     with {:ok, new_virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
@@ -354,12 +354,24 @@ defmodule SyncEngine.Services.TorrentSync do
              hardlink_count: 1
            }),
          # Update the existing VFS inode to point to the most recent torrent_file
-         {:ok, _updated_inode} <-
+         {:ok, updated_inode} <-
            SyncEngine.Services.InodeManager.update_to_most_recent(
              existing_inode,
              torrent.hash,
              rd_file.path
            ) do
+      # Decrement hardlink_count on the old torrent_file if it changed
+      if old_torrent_file_id && old_torrent_file_id != updated_inode.virtual_inode_id do
+        case SyncEngine.Torrents.get_torrent_file_by_id(old_torrent_file_id) do
+          {:ok, old_file} ->
+            SyncEngine.Torrents.decrement_hardlink_count(old_file)
+
+          {:error, :not_found} ->
+            # Old file already deleted, nothing to decrement
+            :ok
+        end
+      end
+
       {:ok, new_virtual_inode}
     else
       error -> error

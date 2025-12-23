@@ -110,8 +110,8 @@ defmodule SyncEngine.Torrents do
   Creates a torrent file with merge and conditional upsert logic.
 
   Uses a merge strategy: attempts to insert, and on conflict (same torrent_hash + torrent_rd_id + rd_id),
-  merges the data by updating only specific fields if the new entry has a newer timestamp.
-  This prevents losing newer data when the same torrent is re-added to Real-Debrid.
+  merges the data by updating only specific fields while preserving hardlink_count.
+  This prevents losing hardlink tracking when the same torrent is re-added to Real-Debrid.
   """
   def create_torrent_file(attrs) do
     changeset =
@@ -120,9 +120,9 @@ defmodule SyncEngine.Torrents do
 
     # Merge strategy: on conflict, upsert with selected fields
     # The unique constraint is on [:torrent_hash, :torrent_rd_id, :rd_id]
-    # Use :replace_all for the upsert to handle merge scenarios
+    # Preserve hardlink_count to avoid resetting reference tracking
     Repo.insert(changeset,
-      on_conflict: :replace_all,
+      on_conflict: {:replace, [:path, :bytes, :selected, :link, :updated_at]},
       conflict_target: [:torrent_hash, :torrent_rd_id, :rd_id]
     )
   end
@@ -602,10 +602,16 @@ defmodule SyncEngine.Torrents do
   end
 
   # Updates a VFS inode to point to a replacement torrent_file
+  # Also increments the hardlink_count of the replacement file
   defp update_inode_to_replacement(inode, replacement_file) do
     case SyncEngine.Services.InodeManager.update_inode_to_file(inode, replacement_file) do
-      {:ok, _} -> :ok
-      {:error, _} -> :ok
+      {:ok, _} ->
+        # Increment hardlink_count on the replacement file since inode now points to it
+        increment_hardlink_count(replacement_file)
+        :ok
+
+      {:error, _} ->
+        :ok
     end
   end
 end
