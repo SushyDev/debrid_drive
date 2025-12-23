@@ -341,6 +341,9 @@ defmodule SyncEngine.Services.TorrentSync do
     old_torrent_file_id = existing_inode.virtual_inode_id
 
     # Create the new torrent_file record for this torrent instance
+    # Use the existing inode's nlink as the initial hardlink_count to maintain consistency
+    initial_hardlink_count = existing_inode.nlink || 1
+
     with {:ok, new_virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
              rd_id: rd_file.id,
@@ -351,7 +354,7 @@ defmodule SyncEngine.Services.TorrentSync do
              torrent_hash: torrent.hash,
              torrent_rd_id: torrent.rd_id,
              node_id: nil,
-             hardlink_count: 1
+             hardlink_count: initial_hardlink_count
            }),
          # Update the existing VFS inode to point to the most recent torrent_file
          {:ok, updated_inode} <-

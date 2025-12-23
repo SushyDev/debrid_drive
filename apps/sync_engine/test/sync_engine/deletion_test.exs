@@ -134,12 +134,15 @@ defmodule SyncEngine.DeletionTest do
       {:ok, hardlink_node2} =
         VFS.create_hardlink_to_virtual_inode(torrent_dir.inode_id, "file2.mkv", torrent_file2.id)
 
-      # Get torrent files by hash (no association, query by hash instead)
+      # Get all torrent files by hash for verification
+      # Note: In this test there's only one torrent instance with this hash,
+      # so list_torrent_files(hash) is sufficient. In multi-instance scenarios,
+      # use TorrentFileQueries.get_files_for_torrent(hash, rd_id) instead.
       torrent_files = SyncEngine.Torrents.list_torrent_files(torrent.hash)
       [_tf1, _tf2] = torrent_files
 
       # Simulate successful API deletion
-      # Now clean up VFS using rd_id
+      # Now clean up VFS using rd_id (targets specific torrent instance)
       assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
 
       # Verify hardlink VFS nodes are removed

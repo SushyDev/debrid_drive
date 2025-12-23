@@ -15,9 +15,6 @@ defmodule VFS.Repo.Migrations.AllowMultipleTorrentsPerHash do
   """
   use Ecto.Migration
 
-  import Ecto.Query
-  alias VFS.Repo
-
   def up do
     # ============================================================================
     # PART 1: Remove unique constraint on torrents.hash

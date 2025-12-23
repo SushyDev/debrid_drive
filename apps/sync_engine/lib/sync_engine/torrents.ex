@@ -128,16 +128,6 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Gets a torrent file by torrent_hash and rd_id.
-  """
-  def get_torrent_file(torrent_hash, rd_id) when is_binary(torrent_hash) do
-    case Repo.get_by(TorrentFile, torrent_hash: torrent_hash, rd_id: rd_id) do
-      nil -> {:error, :not_found}
-      file -> {:ok, file}
-    end
-  end
-
-  @doc """
   Gets a torrent file by node_id.
   """
   def get_torrent_file_by_node_id(node_id) do
