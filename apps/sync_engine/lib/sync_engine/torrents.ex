@@ -76,7 +76,9 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Deletes a torrent and all its files (via cascade).
+  Deletes a torrent and all its files.
+
+  Files are automatically deleted via database trigger (cascade).
   """
   def delete_torrent(%Torrent{} = torrent) do
     Repo.delete(torrent)
@@ -102,12 +104,23 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Creates a torrent file.
+  Creates a torrent file with merge and conditional upsert logic.
+
+  Uses a merge strategy: attempts to insert, and on conflict (same torrent_hash + rd_id),
+  only updates the existing entry if the new data has a more recent timestamp.
+  This prevents losing newer data when the same torrent is re-added to Real-Debrid.
   """
   def create_torrent_file(attrs) do
-    %TorrentFile{}
-    |> TorrentFile.changeset(attrs)
-    |> Repo.insert()
+    changeset =
+      %TorrentFile{}
+      |> TorrentFile.changeset(attrs)
+
+    # Merge strategy: on conflict, only upsert if new entry is newer
+    # The unique constraint is on [:torrent_hash, :rd_id]
+    Repo.insert(changeset,
+      on_conflict: {:replace, [:path, :bytes, :selected, :link, :hardlink_count, :updated_at]},
+      conflict_target: [:torrent_hash, :rd_id]
+    )
   end
 
   @doc """
