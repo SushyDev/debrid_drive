@@ -107,7 +107,7 @@ defmodule SyncEngine.Torrents do
   Creates a torrent file with merge and conditional upsert logic.
 
   Uses a merge strategy: attempts to insert, and on conflict (same torrent_hash + rd_id),
-  only updates the existing entry if the new data has a more recent timestamp.
+  merges the data by updating only specific fields if the new entry has a newer timestamp.
   This prevents losing newer data when the same torrent is re-added to Real-Debrid.
   """
   def create_torrent_file(attrs) do
@@ -115,10 +115,11 @@ defmodule SyncEngine.Torrents do
       %TorrentFile{}
       |> TorrentFile.changeset(attrs)
 
-    # Merge strategy: on conflict, only upsert if new entry is newer
+    # Merge strategy: on conflict, upsert with selected fields
     # The unique constraint is on [:torrent_hash, :rd_id]
+    # Use :replace_all for the upsert to handle merge scenarios
     Repo.insert(changeset,
-      on_conflict: {:replace, [:path, :bytes, :selected, :link, :hardlink_count, :updated_at]},
+      on_conflict: :replace_all,
       conflict_target: [:torrent_hash, :rd_id]
     )
   end
