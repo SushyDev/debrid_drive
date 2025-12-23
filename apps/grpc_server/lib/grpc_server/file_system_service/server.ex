@@ -194,20 +194,21 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Handle virtual inode removal with reference counting
   # The VFS.remove function now handles nlink decrement automatically
-  defp handle_virtual_inode_remove(inode, virtual_inode_id, parent_id, name) do
+  defp handle_virtual_inode_remove(_inode, virtual_inode_id, parent_id, name) do
     VFS.Repo.transact(fn ->
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
-        {:ok, virtual_inode} ->
-          # Check if this is the last link before removing
-          should_delete_torrent = inode.nlink == 1
+        {:ok, torrent_file} ->
+          # Store torrent_rd_id before removal for potential deletion
+          torrent_rd_id = torrent_file.torrent_rd_id
 
-          # Remove the directory entry (VFS handles nlink decrement)
+          # Remove the directory entry (VFS handles nlink decrement and calls decrement_hardlink_count)
           case VFS.remove(parent_id, name, cascade: false) do
             :ok ->
-              # If this was the last hardlink, enqueue torrent deletion
-              if should_delete_torrent do
-                enqueue_torrent_deletion_on_remove(virtual_inode)
-              end
+              # Check if all files in this torrent instance have zero hardlinks
+              SyncEngine.Services.DeletionPolicy.maybe_enqueue_deletion(
+                torrent_file.torrent_hash,
+                torrent_rd_id
+              )
 
               {:ok, :ok}
 
@@ -227,25 +228,6 @@ defmodule GrpcServer.FileSystemService.Server do
       {:ok, :ok} -> :ok
       {:ok, other} -> other
       {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # Enqueue torrent deletion when last hardlink is removed
-  defp enqueue_torrent_deletion_on_remove(virtual_inode) do
-    case SyncEngine.Torrents.get_torrent_by_hash(virtual_inode.torrent_hash) do
-      {:ok, torrent} ->
-        Logger.info(
-          "All hardlinks removed for torrent #{torrent.rd_id}, " <>
-            "enqueueing deletion from RealDebrid"
-        )
-
-        # Queue deletion job
-        SyncEngine.Workers.DeletionWorker.enqueue(torrent.hash)
-        :ok
-
-      {:error, :not_found} ->
-        # Torrent already deleted
-        :ok
     end
   end
 
@@ -585,7 +567,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
   # Gets the cached download URL if valid, otherwise fetches a new one from Real Debrid
   defp get_or_fetch_download_url(torrent_file) do
-    if SyncEngine.Schemas.TorrentFile.link_valid?(torrent_file) do
+    if TorrentFile.link_valid?(torrent_file) do
       {:ok, torrent_file.download_link}
     else
       fetch_and_cache_download_url(torrent_file)
@@ -601,7 +583,7 @@ defmodule GrpcServer.FileSystemService.Server do
 
     with {:ok, response} <- RealDebrid.Api.UnrestrictLink.unrestrict(client, torrent_file.link),
          changeset <-
-           SyncEngine.Schemas.TorrentFile.cache_link_changeset(torrent_file, response.download),
+           TorrentFile.cache_link_changeset(torrent_file, response.download),
          {:ok, updated_file} <- SyncEngine.Torrents.update_torrent_file(changeset) do
       {:ok, updated_file.download_link}
     else

@@ -14,8 +14,8 @@ defmodule SyncEngine.JobQueue do
 
   ## Usage
 
-      # Enqueue a deletion
-      SyncEngine.JobQueue.enqueue(:delete_torrent, %{torrent_hash: "abc123..."})
+      # Enqueue a deletion by rd_id
+      SyncEngine.JobQueue.enqueue(:delete_torrent, %{rd_id: "RDID123"})
 
       # Get queue status
       SyncEngine.JobQueue.status()
@@ -43,7 +43,7 @@ defmodule SyncEngine.JobQueue do
 
   ## Examples
 
-      JobQueue.enqueue(:delete_torrent, %{torrent_hash: "abc123..."})
+      JobQueue.enqueue(:delete_torrent, %{rd_id: "RDID123"})
       JobQueue.enqueue(:add_torrent, %{rd_torrent: torrent_data, torrents_root_id: 1})
   """
   def enqueue(job_type, args) when is_atom(job_type) and is_map(args) do
@@ -248,10 +248,10 @@ defmodule SyncEngine.JobQueue do
 
   ## Private Functions
 
-  defp process_job(%{type: :delete_torrent, args: %{torrent_hash: torrent_hash}}) do
-    Logger.info("#{__MODULE__} processing deletion for torrent_hash=#{torrent_hash}")
+  defp process_job(%{type: :delete_torrent, args: %{rd_id: rd_id}}) do
+    Logger.info("#{__MODULE__} processing deletion for rd_id=#{rd_id}")
 
-    case SyncEngine.Torrents.get_torrent_by_hash(torrent_hash) do
+    case SyncEngine.Torrents.get_torrent_by_rd_id(rd_id) do
       {:ok, torrent} ->
         client = SyncEngine.RealDebridClient.get_client()
 
@@ -261,12 +261,12 @@ defmodule SyncEngine.JobQueue do
         case result do
           :ok ->
             Logger.info("#{__MODULE__} deleted torrent #{torrent.rd_id} from API")
-            SyncEngine.Torrents.cleanup_after_deletion(torrent_hash, cascade_hardlinks: true)
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
 
           {:error, "Not found"} ->
             # Already deleted, just cleanup
             Logger.info("#{__MODULE__} torrent #{torrent.rd_id} already deleted, cleaning up")
-            SyncEngine.Torrents.cleanup_after_deletion(torrent_hash, cascade_hardlinks: true)
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
 
           {:error, reason} ->
             Logger.error("#{__MODULE__} failed to delete torrent #{torrent.rd_id}: #{inspect(reason)}")
@@ -276,7 +276,7 @@ defmodule SyncEngine.JobQueue do
         end
 
       {:error, :not_found} ->
-        Logger.info("#{__MODULE__} torrent_hash=#{torrent_hash} not found, already deleted")
+        Logger.info("#{__MODULE__} rd_id=#{rd_id} not found, already deleted")
         :ok
     end
   end

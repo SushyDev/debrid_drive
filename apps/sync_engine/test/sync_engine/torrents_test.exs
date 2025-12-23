@@ -95,6 +95,47 @@ defmodule SyncEngine.TorrentsTest do
       assert {:error, :not_found} = Torrents.get_torrent_by_rd_id("DELETE_ME")
     end
 
+    test "allows multiple torrents with same hash (different rd_ids)", %{test_dir: test_dir} do
+      {:ok, node1} = VFS.create_directory(test_dir.inode_id, "torrent1")
+      {:ok, node2} = VFS.create_directory(test_dir.inode_id, "torrent2")
+
+      # Create first torrent with hash "same_hash_123"
+      attrs1 = %{
+        rd_id: "RD1",
+        filename: "First Add",
+        hash: "same_hash_123",
+        bytes: 1_000_000,
+        status: "downloaded",
+        inode_id: node1.inode_id
+      }
+
+      {:ok, torrent1} = Torrents.create_torrent(attrs1)
+      assert torrent1.rd_id == "RD1"
+      assert torrent1.hash == "same_hash_123"
+
+      # Create second torrent with same hash but different rd_id
+      attrs2 = %{
+        rd_id: "RD2",
+        filename: "Re-added or Different RD",
+        hash: "same_hash_123",
+        bytes: 1_000_000,
+        status: "magnet_conversion",
+        inode_id: node2.inode_id
+      }
+
+      # This should succeed - multiple torrents can have same hash
+      {:ok, torrent2} = Torrents.create_torrent(attrs2)
+      assert torrent2.rd_id == "RD2"
+      assert torrent2.hash == "same_hash_123"
+
+      # Verify both torrents exist (different IDs)
+      assert torrent1.id != torrent2.id
+
+      # Verify both are in database
+      assert {:ok, _} = Torrents.get_torrent_by_rd_id("RD1")
+      assert {:ok, _} = Torrents.get_torrent_by_rd_id("RD2")
+    end
+
     test "get_torrents_by_rd_id/0 returns map of torrents", %{test_dir: test_dir} do
       {:ok, node1} = VFS.create_directory(test_dir.inode_id, "t1")
       {:ok, node2} = VFS.create_directory(test_dir.inode_id, "t2")
@@ -149,6 +190,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 500,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         inode_id: file_node.inode_id
       }
 
@@ -169,6 +211,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 500,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 
@@ -184,6 +227,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 500,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 
@@ -200,6 +244,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 2_000_000,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         inode_id: nil,
         link: "https://real-debrid.com/unrestrict?link=abc123"
       }
@@ -222,6 +267,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 3_000_000,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: nil,
           link: "https://real-debrid.com/unrestrict?link=def456"
         })
@@ -250,7 +296,7 @@ defmodule SyncEngine.TorrentsTest do
       assert reloaded.hardlink_count == 3
 
       # Decrement: after one decrement, count should be 2
-      {:ok, {new_count, should_delete}} = Torrents.decrement_hardlink_count(reloaded)
+      {:ok, {new_count, should_delete, _rd_id}} = Torrents.decrement_hardlink_count(reloaded)
       assert new_count == 2
       # FALSE because there are still 2 hardlinks remaining
       assert should_delete == false
@@ -269,6 +315,7 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 5_000_000,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: nil,
           link: "https://real-debrid.com/link1"
         })
@@ -280,18 +327,19 @@ defmodule SyncEngine.TorrentsTest do
           bytes: 100_000,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: nil,
           link: "https://real-debrid.com/link2"
         })
 
       # Decrement file1: should_delete = false because file2 still has hardlink_count == 1
-      {:ok, {count1, should_delete1}} = Torrents.decrement_hardlink_count(file1)
+      {:ok, {count1, should_delete1, _rd_id}} = Torrents.decrement_hardlink_count(file1)
       assert count1 == 0
       # file2 still has hardlink_count == 1
       assert should_delete1 == false
 
       # Decrement file2: should_delete = true because now ALL files have hardlink_count == 0
-      {:ok, {count2, should_delete2}} = Torrents.decrement_hardlink_count(file2)
+      {:ok, {count2, should_delete2, _rd_id}} = Torrents.decrement_hardlink_count(file2)
       assert count2 == 0
       # NOW all files are at 0
       assert should_delete2 == true
@@ -305,6 +353,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 1_000_000,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         inode_id: nil,
         link: "https://real-debrid.com/link_old"
       }
@@ -324,6 +373,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 2_000_000,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         inode_id: nil,
         link: "https://real-debrid.com/link_new"
       }
@@ -352,6 +402,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 1_000_000,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         link: "https://real-debrid.com/link1"
       }
 
@@ -366,6 +417,7 @@ defmodule SyncEngine.TorrentsTest do
         bytes: 2_000_000,
         selected: 1,
         torrent_hash: torrent.hash,
+        torrent_rd_id: torrent.rd_id,
         link: "https://real-debrid.com/link2"
       }
 

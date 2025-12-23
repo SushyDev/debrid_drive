@@ -62,7 +62,7 @@ defmodule SyncEngine.Schemas.Torrent do
     ])
     |> validate_required([:rd_id, :filename, :hash, :bytes])
     |> unique_constraint(:rd_id)
-    |> unique_constraint(:hash)
+    # Note: hash is NOT unique - multiple torrent instances can have the same hash
     |> foreign_key_constraint(:inode_id)
   end
 

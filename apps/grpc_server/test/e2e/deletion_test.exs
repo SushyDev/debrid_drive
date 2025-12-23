@@ -13,13 +13,7 @@ defmodule GrpcServer.E2E.DeletionTest do
   use ExUnit.Case, async: false
 
   alias VFS
-  alias VFS.Repo
-  alias VFS.FileMode
-
-  alias StreamMountApi.{
-    RemoveRequest,
-    RemoveResponse
-  }
+  alias StreamMountApi.{RemoveRequest, RemoveResponse}
 
   alias GrpcServer.FileSystemService.Server
 

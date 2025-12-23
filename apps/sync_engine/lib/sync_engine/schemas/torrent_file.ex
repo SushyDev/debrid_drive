@@ -28,6 +28,9 @@ defmodule SyncEngine.Schemas.TorrentFile do
     # Relationships - using hash instead of ID for resilience
     # Torrent hash is immutable, while torrent ID can change if torrent is re-added
     field(:torrent_hash, :string)
+    # Track which specific torrent instance (rd_id) this file belongs to
+    # This allows multiple torrent instances with the same hash to coexist
+    field(:torrent_rd_id, :string)
     # Reference to the inode representing this file in VFS
     field(:inode_id, :integer)
 
@@ -44,15 +47,16 @@ defmodule SyncEngine.Schemas.TorrentFile do
       :selected,
       :link,
       :torrent_hash,
+      :torrent_rd_id,
       :inode_id,
       :download_link,
       :link_expires_at,
       :link_fetched_at,
       :hardlink_count
     ])
-    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_hash])
+    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_hash, :torrent_rd_id])
     |> validate_number(:hardlink_count, greater_than_or_equal_to: 0)
-    |> unique_constraint([:torrent_hash, :rd_id])
+    |> unique_constraint([:torrent_hash, :torrent_rd_id, :rd_id])
     |> foreign_key_constraint(:inode_id)
   end
 

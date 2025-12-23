@@ -71,6 +71,7 @@ defmodule SyncEngine.TorrentFileTest do
           bytes: 500,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 
@@ -96,6 +97,7 @@ defmodule SyncEngine.TorrentFileTest do
           bytes: 500,
           selected: 1,
           torrent_hash: torrent.hash,
+          torrent_rd_id: torrent.rd_id,
           inode_id: file_node.inode_id
         })
 
