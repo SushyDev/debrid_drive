@@ -73,8 +73,9 @@ defmodule SyncEngine.Torrents do
 
     # Upsert strategy: if torrent with this rd_id exists, update it with latest data
     # The unique constraint is on :rd_id
+    # Replace all fields except id, inserted_at, and updated_at
     Repo.insert(changeset,
-      on_conflict: :replace_all_except_primary_key,
+      on_conflict: {:replace_all_except, [:id, :inserted_at]},
       conflict_target: :real_debrid_torrent_id
     )
   end

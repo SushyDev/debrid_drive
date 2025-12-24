@@ -180,7 +180,7 @@ defmodule SyncEngine.Services.TorrentSync do
                  SyncEngine.Torrents.create_torrent(%{
                    real_debrid_torrent_id: rd_torrent.id,
                    filename: rd_torrent.filename,
-                   real_debrid_torrent_hash: rd_torrent.real_debrid_torrent_hash,
+                   real_debrid_torrent_hash: rd_torrent.hash,
                    bytes: rd_torrent.bytes,
                    host: rd_torrent.host,
                    split: rd_torrent.split,
@@ -242,7 +242,7 @@ defmodule SyncEngine.Services.TorrentSync do
     SyncEngine.Torrents.reject_torrent(%{
       real_debrid_torrent_id: rd_torrent.id,
       filename: rd_torrent.filename,
-      real_debrid_torrent_hash: rd_torrent.real_debrid_torrent_hash,
+      real_debrid_torrent_hash: rd_torrent.hash,
       reason: Atom.to_string(reason),
       error_details: "Torrent failed validation: #{inspect(reason)}"
     })
@@ -416,7 +416,7 @@ defmodule SyncEngine.Services.TorrentSync do
 
   # Format torrent directory name - use hash for consistency and regeneration
   defp format_torrent_directory_name(rd_torrent) do
-    rd_torrent.real_debrid_torrent_hash
+    rd_torrent.hash
   end
 
   # Sanitize filename to be safe for filesystem
