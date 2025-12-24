@@ -70,11 +70,11 @@ defmodule SyncEngine.Services.TorrentVerifier do
           verify_torrent_files(torrent)
 
         {:error, :not_found} ->
-          # Torrent directory is missing, remove the torrent
+          # Torrent directory is missing, remove the torrent and clean up associated VFS inodes
           Logger.warning("Torrent directory missing for #{torrent.filename}, removing from database")
 
-          case Torrents.delete_torrent(torrent) do
-            {:ok, _} ->
+          case Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id) do
+            :ok ->
               %{removed_files: 0, removed_torrent: true, errors: []}
 
             {:error, reason} ->
@@ -86,11 +86,11 @@ defmodule SyncEngine.Services.TorrentVerifier do
           end
       end
     else
-      # Torrent has no VFS node, remove it
+      # Torrent has no VFS node, remove it and clean up associated VFS inodes
       Logger.warning("Torrent has no VFS node for #{torrent.filename}, removing from database")
 
-      case Torrents.delete_torrent(torrent) do
-        {:ok, _} ->
+      case Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id) do
+        :ok ->
           %{removed_files: 0, removed_torrent: true, errors: []}
 
         {:error, reason} ->
