@@ -54,7 +54,7 @@ defmodule SyncEngine.DeletionTest do
 
     # Create torrent record with inode_id
     torrent_attrs = %{
-      rd_id: rd_id,
+      real_debrid_torrent_id: rd_id,
       hash: hash,
       filename: filename,
       bytes: bytes,
@@ -74,9 +74,9 @@ defmodule SyncEngine.DeletionTest do
     # Create virtual inode (torrent_file) - no node_id, it's a virtual inode
     {:ok, torrent_file} =
       Repo.insert(%TorrentFile{
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
-        rd_id: 1,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
+        real_debrid_torrent_id: 1,
         path: "/movie.mkv",
         bytes: bytes,
         selected: 1,
@@ -96,7 +96,7 @@ defmodule SyncEngine.DeletionTest do
       {torrent, _torrent_dir, _file_node, _torrent_file} = create_torrent_fixture(root)
 
       # Mark torrent for deletion using rd_id
-      assert :ok = SyncEngine.Torrents.mark_for_deletion(torrent.rd_id)
+      assert :ok = SyncEngine.Torrents.mark_for_deletion(torrent.real_debrid_torrent_id)
 
       # Verify status changed
       updated_torrent = Repo.get(Torrent, torrent.id)
@@ -108,24 +108,24 @@ defmodule SyncEngine.DeletionTest do
       {torrent, _torrent_dir, _file_node, _torrent_file} = create_torrent_fixture(root)
 
       # Queue deletion via DeletionWorker using rd_id
-      assert :ok = SyncEngine.Torrents.queue_deletion(torrent.rd_id)
+      assert :ok = SyncEngine.Torrents.queue_deletion(torrent.real_debrid_torrent_id)
 
       # Verify deletion job was enqueued
-      # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{rd_id: torrent.rd_id}
+      # assert_enqueued worker: SyncEngine.Workers.DeletionWorker, args: %{real_debrid_torrent_id: torrent.real_debrid_torrent_id}
     end
   end
 
   describe "VFS cleanup after successful deletion" do
     test "removes all VFS nodes associated with torrent", %{root: root} do
       {torrent, torrent_dir, hardlink_node, _torrent_file} =
-        create_torrent_fixture(root, rd_id: "ABC123", deletion_status: "pending_deletion")
+        create_torrent_fixture(root, real_debrid_torrent_id: "ABC123", deletion_status: "pending_deletion")
 
       # Create additional hardlink to a virtual inode
       {:ok, torrent_file2} =
         Repo.insert(%TorrentFile{
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
-          rd_id: 2,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
+          real_debrid_torrent_id: 2,
           path: "/file2.mkv",
           bytes: 2_000_000,
           selected: 1
@@ -138,12 +138,12 @@ defmodule SyncEngine.DeletionTest do
       # Note: In this test there's only one torrent instance with this hash,
       # so list_torrent_files(hash) is sufficient. In multi-instance scenarios,
       # use TorrentFileQueries.get_files_for_torrent(hash, rd_id) instead.
-      torrent_files = SyncEngine.Torrents.list_torrent_files(torrent.hash)
+      torrent_files = SyncEngine.Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)
       [_tf1, _tf2] = torrent_files
 
       # Simulate successful API deletion
       # Now clean up VFS using rd_id (targets specific torrent instance)
-      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
+      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
 
       # Verify hardlink VFS nodes are removed
       assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
@@ -151,7 +151,7 @@ defmodule SyncEngine.DeletionTest do
       assert {:error, :not_found} = VFS.get_node(torrent_dir.inode_id)
 
       # Verify torrent_files are removed
-      assert Repo.all(from(tf in TorrentFile, where: tf.torrent_hash == ^torrent.hash)) == []
+      assert Repo.all(from(tf in TorrentFile, where: tf.torrent_hash == ^torrent.real_debrid_torrent_hash)) == []
 
       # Verify torrent is removed
       assert Repo.get(Torrent, torrent.id) == nil
@@ -159,7 +159,7 @@ defmodule SyncEngine.DeletionTest do
 
     test "preserves VFS nodes if API deletion failed", %{root: root} do
       {_torrent, torrent_dir, hardlink_node, _torrent_file} =
-        create_torrent_fixture(root, rd_id: "ABC456", deletion_status: "deletion_failed")
+        create_torrent_fixture(root, real_debrid_torrent_id: "ABC456", deletion_status: "deletion_failed")
 
       # Do NOT clean up if deletion failed
       # VFS nodes should remain
@@ -173,7 +173,7 @@ defmodule SyncEngine.DeletionTest do
     test "detects torrent deleted externally and cleans up VFS", %{root: root} do
       {torrent, _torrent_dir, hardlink_node, _torrent_file} =
         create_torrent_fixture(root,
-          rd_id: "DELETED_EXTERNALLY",
+          real_debrid_torrent_id: "DELETED_EXTERNALLY",
           deletion_status: "pending_deletion"
         )
 
@@ -192,7 +192,7 @@ defmodule SyncEngine.DeletionTest do
     @tag :skip
     test "retries failed deletions on next sync", %{root: root} do
       {torrent, _torrent_dir, _file_node, _torrent_file} =
-        create_torrent_fixture(root, rd_id: "RETRY_ME", deletion_status: "failed")
+        create_torrent_fixture(root, real_debrid_torrent_id: "RETRY_ME", deletion_status: "failed")
 
       # Update torrent with deletion_requested_at (needs truncation)
       torrent
@@ -213,7 +213,7 @@ defmodule SyncEngine.DeletionTest do
 
     test "is idempotent - multiple syncs don't cause errors", %{root: root} do
       {_torrent, _torrent_dir, _file_node, _torrent_file} =
-        create_torrent_fixture(root, rd_id: "IDEMPOTENT")
+        create_torrent_fixture(root, real_debrid_torrent_id: "IDEMPOTENT")
 
       # First sync processes deletion - but torrent is not marked for deletion yet, so nothing happens
       # Actually we need a client, so let's just skip this for now
@@ -240,7 +240,7 @@ defmodule SyncEngine.DeletionTest do
   describe "hard link handling during deletion" do
     test "hardlinks to virtual inodes are broken when virtual inode is deleted", %{root: root} do
       {_torrent, _torrent_dir, hardlink_node, torrent_file} =
-        create_torrent_fixture(root, rd_id: "HAS_HARDLINKS")
+        create_torrent_fixture(root, real_debrid_torrent_id: "HAS_HARDLINKS")
 
       # Create another hardlink to the same virtual inode outside torrent directory
       {:ok, external_hardlink} =
@@ -275,7 +275,7 @@ defmodule SyncEngine.DeletionTest do
 
     test "cascades hardlink deletion when torrent is deleted with cascade option", %{root: root} do
       {torrent, _torrent_dir, hardlink_node, torrent_file} =
-        create_torrent_fixture(root, rd_id: "CASCADE_LINKS", deletion_status: "pending_deletion")
+        create_torrent_fixture(root, real_debrid_torrent_id: "CASCADE_LINKS", deletion_status: "pending_deletion")
 
       # Create external hardlink to the same virtual inode
       {:ok, external_hardlink} =
@@ -283,7 +283,7 @@ defmodule SyncEngine.DeletionTest do
 
       # Clean up after deletion using rd_id
       # This should delete all hardlinks pointing to torrent files
-      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
+      assert :ok = SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
 
       # All hardlinks should be deleted
       assert {:error, :not_found} = VFS.get_node(hardlink_node.inode_id)
@@ -301,12 +301,12 @@ defmodule SyncEngine.DeletionTest do
         for i <- 1..10 do
           {torrent, _torrent_dir, _file_node, _torrent_file} =
             create_torrent_fixture(root,
-              rd_id: "BATCH_#{i}",
+              real_debrid_torrent_id: "BATCH_#{i}",
               hash: "hash#{i}",
               filename: "Batch #{i}"
             )
 
-          torrent.rd_id
+          torrent.real_debrid_torrent_id
         end
 
       # Batch delete using rd_ids - this will mark and queue all deletions

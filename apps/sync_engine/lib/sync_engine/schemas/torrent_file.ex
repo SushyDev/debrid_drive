@@ -7,7 +7,7 @@ defmodule SyncEngine.Schemas.TorrentFile do
 
   schema "torrent_files" do
     # Real Debrid file fields
-    field(:rd_id, :integer)
+    field(:real_debrid_torrent_file_id, :integer)
     field(:path, :string)
     field(:bytes, :integer)
     field(:selected, :integer)
@@ -27,10 +27,10 @@ defmodule SyncEngine.Schemas.TorrentFile do
 
     # Relationships - using hash instead of ID for resilience
     # Torrent hash is immutable, while torrent ID can change if torrent is re-added
-    field(:torrent_hash, :string)
-    # Track which specific torrent instance (rd_id) this file belongs to
+    field(:real_debrid_torrent_hash, :string)
+    # Track which specific torrent instance (real_debrid_torrent_id) this file belongs to
     # This allows multiple torrent instances with the same hash to coexist
-    field(:torrent_rd_id, :string)
+    field(:real_debrid_torrent_id, :string)
     # Reference to the inode representing this file in VFS
     field(:inode_id, :integer)
 
@@ -41,22 +41,22 @@ defmodule SyncEngine.Schemas.TorrentFile do
   def changeset(torrent_file, attrs) do
     torrent_file
     |> cast(attrs, [
-      :rd_id,
+      :real_debrid_torrent_file_id,
       :path,
       :bytes,
       :selected,
       :link,
-      :torrent_hash,
-      :torrent_rd_id,
+      :real_debrid_torrent_hash,
+      :real_debrid_torrent_id,
       :inode_id,
       :download_link,
       :link_expires_at,
       :link_fetched_at,
       :hardlink_count
     ])
-    |> validate_required([:rd_id, :path, :bytes, :selected, :torrent_hash, :torrent_rd_id])
+    |> validate_required([:real_debrid_torrent_file_id, :path, :bytes, :selected, :real_debrid_torrent_hash, :real_debrid_torrent_id])
     |> validate_number(:hardlink_count, greater_than_or_equal_to: 0)
-    |> unique_constraint([:torrent_hash, :torrent_rd_id, :rd_id])
+    |> unique_constraint([:real_debrid_torrent_hash, :real_debrid_torrent_id, :real_debrid_torrent_file_id])
     |> foreign_key_constraint(:inode_id)
   end
 
@@ -66,7 +66,7 @@ defmodule SyncEngine.Schemas.TorrentFile do
   def from_rd_api(attrs) when is_map(attrs) do
     %__MODULE__{}
     |> changeset(%{
-      rd_id: attrs[:id] || attrs["id"],
+      real_debrid_torrent_file_id: attrs[:id] || attrs["id"],
       path: attrs[:path] || attrs["path"],
       bytes: attrs[:bytes] || attrs["bytes"],
       selected: attrs[:selected] || attrs["selected"]

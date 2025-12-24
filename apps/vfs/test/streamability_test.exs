@@ -18,7 +18,7 @@ defmodule VFS.StreamabilityTest do
     # Create a test torrent record
     {:ok, torrent} =
       Torrents.create_torrent(%{
-        rd_id: "test_torrent_stream_123",
+        real_debrid_torrent_id: "test_torrent_stream_123",
         filename: "Test Torrent For Streaming",
         hash: "testhash_stream_123",
         bytes: 1_000_000_000,
@@ -59,13 +59,13 @@ defmodule VFS.StreamabilityTest do
     } do
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/no_link_file.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: nil,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           node_id: nil,
           hardlink_count: 1
         })
@@ -86,13 +86,13 @@ defmodule VFS.StreamabilityTest do
     } do
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/streamable_file.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download/streamable_file",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           node_id: nil,
           hardlink_count: 1
         })
@@ -114,13 +114,13 @@ defmodule VFS.StreamabilityTest do
     } do
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/preloaded_file.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download/preloaded_file",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           node_id: nil,
           hardlink_count: 1
         })
@@ -144,13 +144,13 @@ defmodule VFS.StreamabilityTest do
     test "returns true for torrent file with link", %{torrent: torrent} do
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/test.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/download",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id
         })
 
       assert Streamability.virtual_inode_streamable?(virtual_inode)
@@ -159,13 +159,13 @@ defmodule VFS.StreamabilityTest do
     test "returns false for torrent file without link", %{torrent: torrent} do
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/test.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: nil,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id
         })
 
       refute Streamability.virtual_inode_streamable?(virtual_inode)
@@ -205,13 +205,13 @@ defmodule VFS.StreamabilityTest do
       # Create virtual inode with link
       {:ok, vi} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file1.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/file1",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           hardlink_count: 1
         })
 
@@ -241,13 +241,13 @@ defmodule VFS.StreamabilityTest do
       # Create one virtual inode
       {:ok, vi} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/shared.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/shared",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           hardlink_count: 3
         })
 
@@ -284,13 +284,13 @@ defmodule VFS.StreamabilityTest do
     } do
       {:ok, vi} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/idempotent.mkv",
           bytes: 1_000_000,
           selected: 1,
           link: "https://example.com/idempotent",
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           hardlink_count: 1
         })
 

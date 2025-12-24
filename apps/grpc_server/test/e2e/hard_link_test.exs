@@ -33,7 +33,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
     # Create a torrent with required fields
     with {:ok, torrent} <-
            VFS.Repo.insert(%Torrent{
-             rd_id: "test-#{System.unique_integer()}",
+             real_debrid_torrent_id: "test-#{System.unique_integer()}",
              filename: filename,
              hash: "testhash#{System.unique_integer()}",
              bytes: 5_000_000,
@@ -49,9 +49,9 @@ defmodule GrpcServer.E2E.HardLinkTest do
          # Create a torrent_file (virtual inode)
          {:ok, torrent_file} <-
            VFS.Repo.insert(%TorrentFile{
-             torrent_hash: torrent.hash,
-             torrent_rd_id: torrent.rd_id,
-             rd_id: 1,
+             real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+             torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
+             real_debrid_torrent_id: 1,
              path: "/#{filename}",
              bytes: 5_000_000,
              selected: 1,
@@ -441,7 +441,7 @@ defmodule GrpcServer.E2E.HardLinkTest do
       # Create a torrent with virtual inode
       {:ok, torrent} =
         VFS.Repo.insert(%Torrent{
-          rd_id: "test-#{System.unique_integer()}",
+          real_debrid_torrent_id: "test-#{System.unique_integer()}",
           filename: "video.mkv",
           hash: "testhash#{System.unique_integer()}",
           bytes: 5_000_000,
@@ -458,9 +458,9 @@ defmodule GrpcServer.E2E.HardLinkTest do
       # Create a torrent_file (virtual inode)
       {:ok, torrent_file} =
         VFS.Repo.insert(%TorrentFile{
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
-          rd_id: 1,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
+          real_debrid_torrent_id: 1,
           path: "/video.mkv",
           bytes: 5_000_000,
           selected: 1,

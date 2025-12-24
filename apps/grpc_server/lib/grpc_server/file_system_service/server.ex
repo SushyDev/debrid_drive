@@ -199,14 +199,14 @@ defmodule GrpcServer.FileSystemService.Server do
       case SyncEngine.Torrents.get_torrent_file_by_id(virtual_inode_id) do
         {:ok, torrent_file} ->
           # Store torrent_rd_id before removal for potential deletion
-          torrent_rd_id = torrent_file.torrent_rd_id
+          torrent_rd_id = torrent_file.real_debrid_torrent_id
 
           # Remove the directory entry (VFS handles nlink decrement and calls decrement_hardlink_count)
           case VFS.remove(parent_id, name, cascade: false) do
             :ok ->
               # Check if all files in this torrent instance have zero hardlinks
               SyncEngine.Services.DeletionPolicy.maybe_enqueue_deletion(
-                torrent_file.torrent_hash,
+                torrent_file.real_debrid_torrent_hash,
                 torrent_rd_id
               )
 

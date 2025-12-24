@@ -39,7 +39,7 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
     # Create a torrent
     {:ok, torrent} =
       VFS.Repo.insert(%Torrent{
-        rd_id: "test-#{System.unique_integer()}",
+        real_debrid_torrent_id: "test-#{System.unique_integer()}",
         filename: filename,
         hash: "testhash#{System.unique_integer()}",
         bytes: size,
@@ -56,9 +56,9 @@ defmodule GrpcServer.E2E.CopyStreamableHardlinkTest do
     # Create a torrent_file (virtual inode) with a link (streamable)
     {:ok, torrent_file} =
       VFS.Repo.insert(%TorrentFile{
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
-        rd_id: 1,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
+        real_debrid_torrent_id: 1,
         path: "/#{filename}",
         bytes: size,
         selected: 1,

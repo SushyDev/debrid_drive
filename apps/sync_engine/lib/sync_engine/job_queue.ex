@@ -146,7 +146,7 @@ defmodule SyncEngine.JobQueue do
     pending_deletions = SyncEngine.Torrents.list_pending_deletions()
 
     Enum.each(pending_deletions, fn torrent ->
-      enqueue(:delete_torrent, %{torrent_hash: torrent.hash})
+      enqueue(:delete_torrent, %{torrent_hash: torrent.real_debrid_torrent_hash})
     end)
 
     if length(pending_deletions) > 0 do
@@ -256,20 +256,20 @@ defmodule SyncEngine.JobQueue do
         client = SyncEngine.RealDebridClient.get_client()
 
         # Call API deletion directly
-        result = RealDebrid.Api.Delete.delete(client, torrent.rd_id)
+        result = RealDebrid.Api.Delete.delete(client, torrent.real_debrid_torrent_id)
 
         case result do
           :ok ->
-            Logger.info("#{__MODULE__} deleted torrent #{torrent.rd_id} from API")
-            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
+            Logger.info("#{__MODULE__} deleted torrent #{torrent.real_debrid_torrent_id} from API")
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
 
           {:error, "Not found"} ->
             # Already deleted, just cleanup
-            Logger.info("#{__MODULE__} torrent #{torrent.rd_id} already deleted, cleaning up")
-            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
+            Logger.info("#{__MODULE__} torrent #{torrent.real_debrid_torrent_id} already deleted, cleaning up")
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
 
           {:error, reason} ->
-            Logger.error("#{__MODULE__} failed to delete torrent #{torrent.rd_id}: #{inspect(reason)}")
+            Logger.error("#{__MODULE__} failed to delete torrent #{torrent.real_debrid_torrent_id}: #{inspect(reason)}")
 
             SyncEngine.Torrents.record_deletion_attempt(torrent, {:error, reason})
             {:error, reason}

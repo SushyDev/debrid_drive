@@ -14,9 +14,9 @@ defmodule SyncEngine.Schemas.RejectedTorrent do
 
   schema "rejected_torrents" do
     # Real Debrid fields
-    field(:rd_id, :string)
+    field(:real_debrid_torrent_id, :string)
     field(:filename, :string)
-    field(:hash, :string)
+    field(:real_debrid_torrent_hash, :string)
 
     # Rejection details
     field(:reason, :string)
@@ -31,16 +31,16 @@ defmodule SyncEngine.Schemas.RejectedTorrent do
   def changeset(rejected_torrent, attrs) do
     rejected_torrent
     |> cast(attrs, [
-      :rd_id,
+      :real_debrid_torrent_id,
       :filename,
-      :hash,
+      :real_debrid_torrent_hash,
       :reason,
       :error_details,
       :attempt_count,
       :last_attempted_at
     ])
-    |> validate_required([:rd_id, :filename, :reason])
-    |> unique_constraint(:rd_id)
+    |> validate_required([:real_debrid_torrent_id, :filename, :reason])
+    |> unique_constraint(:real_debrid_torrent_id)
   end
 
   @doc """

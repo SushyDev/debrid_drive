@@ -60,7 +60,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
     - `%{removed_files: count, removed_torrent: boolean, errors: [errors]}`
   """
   def verify_torrent(%Torrent{} = torrent) do
-    Logger.debug("Verifying torrent: #{torrent.filename} (#{torrent.rd_id})")
+    Logger.debug("Verifying torrent: #{torrent.filename} (#{torrent.real_debrid_torrent_id})")
 
     # First, check if the torrent's VFS node exists
     if torrent.inode_id do
@@ -73,7 +73,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
           # Torrent directory is missing, remove the torrent and clean up associated VFS inodes
           Logger.warning("Torrent directory missing for #{torrent.filename}, removing from database")
 
-          case Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id) do
+          case Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id) do
             :ok ->
               %{removed_files: 0, removed_torrent: true, errors: []}
 
@@ -81,7 +81,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
               %{
                 removed_files: 0,
                 removed_torrent: false,
-                errors: [{:delete_torrent_failed, torrent.rd_id, reason}]
+                errors: [{:delete_torrent_failed, torrent.real_debrid_torrent_id, reason}]
               }
           end
       end
@@ -89,7 +89,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
       # Torrent has no VFS node, remove it and clean up associated VFS inodes
       Logger.warning("Torrent has no VFS node for #{torrent.filename}, removing from database")
 
-      case Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id) do
+      case Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id) do
         :ok ->
           %{removed_files: 0, removed_torrent: true, errors: []}
 
@@ -97,14 +97,14 @@ defmodule SyncEngine.Services.TorrentVerifier do
           %{
             removed_files: 0,
             removed_torrent: false,
-            errors: [{:delete_torrent_failed, torrent.rd_id, reason}]
+            errors: [{:delete_torrent_failed, torrent.real_debrid_torrent_id, reason}]
           }
       end
     end
   end
 
   defp verify_torrent_files(%Torrent{} = torrent) do
-    files = Torrents.list_torrent_files(torrent.hash)
+    files = Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)
 
     # Check each file
     file_results = Enum.map(files, &verify_torrent_file/1)
@@ -126,7 +126,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
           %{
             removed_files: removed_files,
             removed_torrent: false,
-            errors: file_errors ++ [{:remove_empty_torrent_failed, torrent.rd_id, reason}]
+            errors: file_errors ++ [{:remove_empty_torrent_failed, torrent.real_debrid_torrent_id, reason}]
           }
       end
     else
@@ -192,7 +192,7 @@ defmodule SyncEngine.Services.TorrentVerifier do
                 {:ok, :ok}
 
               {:error, reason} ->
-                Logger.warning("Failed to remove VFS directory for torrent #{torrent.rd_id}: #{inspect(reason)}")
+                Logger.warning("Failed to remove VFS directory for torrent #{torrent.real_debrid_torrent_id}: #{inspect(reason)}")
 
                 # Still consider it successful since the torrent is deleted
                 {:ok, :ok}

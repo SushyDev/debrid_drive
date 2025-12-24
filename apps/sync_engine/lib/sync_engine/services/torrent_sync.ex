@@ -178,9 +178,9 @@ defmodule SyncEngine.Services.TorrentSync do
                # 2. Create torrent record
                {:ok, torrent} <-
                  SyncEngine.Torrents.create_torrent(%{
-                   rd_id: rd_torrent.id,
+                   real_debrid_torrent_id: rd_torrent.id,
                    filename: rd_torrent.filename,
-                   hash: rd_torrent.hash,
+                   real_debrid_torrent_hash: rd_torrent.real_debrid_torrent_hash,
                    bytes: rd_torrent.bytes,
                    host: rd_torrent.host,
                    split: rd_torrent.split,
@@ -240,9 +240,9 @@ defmodule SyncEngine.Services.TorrentSync do
     Logger.warning("Rejecting torrent #{rd_torrent.id}: #{inspect(reason)}")
 
     SyncEngine.Torrents.reject_torrent(%{
-      rd_id: rd_torrent.id,
+      real_debrid_torrent_id: rd_torrent.id,
       filename: rd_torrent.filename,
-      hash: rd_torrent.hash,
+      real_debrid_torrent_hash: rd_torrent.real_debrid_torrent_hash,
       reason: Atom.to_string(reason),
       error_details: "Torrent failed validation: #{inspect(reason)}"
     })
@@ -304,13 +304,13 @@ defmodule SyncEngine.Services.TorrentSync do
     # Create virtual inode first (without VFS node)
     with {:ok, virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
-             rd_id: rd_file.id,
+             real_debrid_torrent_file_id: rd_file.id,
              path: rd_file.path,
              bytes: rd_file.bytes,
              selected: rd_file.selected,
              link: link,
-             torrent_hash: torrent.hash,
-             torrent_rd_id: torrent.rd_id,
+             real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+             real_debrid_torrent_id: torrent.real_debrid_torrent_id,
              node_id: nil,
              hardlink_count: 1
            }),
@@ -346,13 +346,13 @@ defmodule SyncEngine.Services.TorrentSync do
 
     with {:ok, new_virtual_inode} <-
            SyncEngine.Torrents.create_torrent_file(%{
-             rd_id: rd_file.id,
+             real_debrid_torrent_file_id: rd_file.id,
              path: rd_file.path,
              bytes: rd_file.bytes,
              selected: rd_file.selected,
              link: link,
-             torrent_hash: torrent.hash,
-             torrent_rd_id: torrent.rd_id,
+             real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+             real_debrid_torrent_id: torrent.real_debrid_torrent_id,
              node_id: nil,
              hardlink_count: initial_hardlink_count
            }),
@@ -360,7 +360,7 @@ defmodule SyncEngine.Services.TorrentSync do
          {:ok, updated_inode} <-
            SyncEngine.Services.InodeManager.update_to_most_recent(
              existing_inode,
-             torrent.hash,
+             torrent.real_debrid_torrent_hash,
              rd_file.path
            ) do
       # Decrement hardlink_count on the old torrent_file if it changed
@@ -401,22 +401,22 @@ defmodule SyncEngine.Services.TorrentSync do
   end
 
   defp remove_torrent(db_torrent) do
-    Logger.info("Removing torrent: #{db_torrent.filename} (#{db_torrent.rd_id})")
+    Logger.info("Removing torrent: #{db_torrent.filename} (#{db_torrent.real_debrid_torrent_id})")
 
     # Use proper cleanup that handles VFS inodes, directory entries, and files
-    case SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(db_torrent.rd_id) do
+    case SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(db_torrent.real_debrid_torrent_id) do
       :ok ->
         {:ok, db_torrent}
 
       {:error, reason} ->
-        Logger.error("Failed to remove torrent #{db_torrent.rd_id}: #{inspect(reason)}")
+        Logger.error("Failed to remove torrent #{db_torrent.real_debrid_torrent_id}: #{inspect(reason)}")
         {:error, reason}
     end
   end
 
   # Format torrent directory name - use hash for consistency and regeneration
   defp format_torrent_directory_name(rd_torrent) do
-    rd_torrent.hash
+    rd_torrent.real_debrid_torrent_hash
   end
 
   # Sanitize filename to be safe for filesystem
@@ -449,10 +449,10 @@ defmodule SyncEngine.Services.TorrentSync do
     # Clean up torrents that are gone from the API
     results =
       Enum.map(pending_deletions, fn torrent ->
-        if not MapSet.member?(api_ids_set, torrent.rd_id) do
+        if not MapSet.member?(api_ids_set, torrent.real_debrid_torrent_id) do
           # Torrent is gone from API, clean it up locally
-          Logger.info("Reconciling deletion for torrent #{torrent.rd_id} - already gone from API")
-          SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
+          Logger.info("Reconciling deletion for torrent #{torrent.real_debrid_torrent_id} - already gone from API")
+          SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
         else
           :skip
         end
@@ -483,27 +483,27 @@ defmodule SyncEngine.Services.TorrentSync do
 
     results =
       Enum.map(failed_torrents, fn torrent ->
-        Logger.info("Retrying deletion for torrent #{torrent.rd_id} (attempt #{torrent.deletion_attempts + 1}/3)")
+        Logger.info("Retrying deletion for torrent #{torrent.real_debrid_torrent_id} (attempt #{torrent.deletion_attempts + 1}/3)")
 
         # Attempt deletion
-        result = RealDebrid.Api.Delete.delete(client, torrent.rd_id)
+        result = RealDebrid.Api.Delete.delete(client, torrent.real_debrid_torrent_id)
 
         case result do
           :ok ->
-            Logger.info("Retry successful for torrent #{torrent.rd_id}")
-            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
-            {:success, torrent.hash}
+            Logger.info("Retry successful for torrent #{torrent.real_debrid_torrent_id}")
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
+            {:success, torrent.real_debrid_torrent_hash}
 
           {:error, "Not found"} ->
             # Already deleted from API, just cleanup
-            Logger.info("Torrent #{torrent.rd_id} already deleted, cleaning up")
-            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
-            {:success, torrent.hash}
+            Logger.info("Torrent #{torrent.real_debrid_torrent_id} already deleted, cleaning up")
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
+            {:success, torrent.real_debrid_torrent_hash}
 
           {:error, reason} ->
-            Logger.warning("Retry failed for torrent #{torrent.rd_id}: #{inspect(reason)}")
+            Logger.warning("Retry failed for torrent #{torrent.real_debrid_torrent_id}: #{inspect(reason)}")
             SyncEngine.Torrents.record_deletion_attempt(torrent, {:error, reason})
-            {:failed, torrent.hash, reason}
+            {:failed, torrent.real_debrid_torrent_hash, reason}
         end
       end)
 
@@ -530,18 +530,18 @@ defmodule SyncEngine.Services.TorrentSync do
 
     results =
       Enum.map(pending, fn torrent ->
-        Logger.info("Processing deletion for torrent #{torrent.rd_id}")
+        Logger.info("Processing deletion for torrent #{torrent.real_debrid_torrent_id}")
 
-        case RealDebrid.Api.Delete.delete(client, torrent.rd_id) do
+        case RealDebrid.Api.Delete.delete(client, torrent.real_debrid_torrent_id) do
           :ok ->
             # Deletion succeeded, clean up local records
-            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.rd_id)
-            {:ok, torrent.hash}
+            SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(torrent.real_debrid_torrent_id)
+            {:ok, torrent.real_debrid_torrent_hash}
 
           {:error, reason} ->
             # Deletion failed, record the attempt
             SyncEngine.Torrents.record_deletion_attempt(torrent, {:error, reason})
-            {:error, {torrent.hash, reason}}
+            {:error, {torrent.real_debrid_torrent_hash, reason}}
         end
       end)
 

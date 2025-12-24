@@ -15,7 +15,7 @@ defmodule SyncEngine.TorrentFileTest do
 
     {:ok, torrent} =
       Torrents.create_torrent(%{
-        rd_id: "TEST",
+        real_debrid_torrent_id: "TEST",
         filename: "Test",
         hash: "hash",
         bytes: 1000,
@@ -66,12 +66,12 @@ defmodule SyncEngine.TorrentFileTest do
     } do
       {:ok, file} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 
@@ -92,12 +92,12 @@ defmodule SyncEngine.TorrentFileTest do
     test "cached link persists in database", %{torrent: torrent, file_node: file_node} do
       {:ok, file} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 

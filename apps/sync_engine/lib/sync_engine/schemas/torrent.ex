@@ -7,9 +7,9 @@ defmodule SyncEngine.Schemas.Torrent do
 
   schema "torrents" do
     # Real Debrid fields
-    field(:rd_id, :string)
+    field(:real_debrid_torrent_id, :string)
     field(:filename, :string)
-    field(:hash, :string)
+    field(:real_debrid_torrent_hash, :string)
     # bigint in database, integer type in Ecto
     field(:bytes, :integer)
     field(:host, :string)
@@ -31,7 +31,7 @@ defmodule SyncEngine.Schemas.Torrent do
     # Relationships
     # Reference to the directory inode in VFS
     field(:inode_id, :integer)
-    # Note: files relationship removed - query by torrent_hash instead
+    # Note: files relationship removed - query by real_debrid_torrent_hash instead
     # TorrentFiles now reference torrents by hash, not by ID
 
     timestamps()
@@ -41,9 +41,9 @@ defmodule SyncEngine.Schemas.Torrent do
   def changeset(torrent, attrs) do
     torrent
     |> cast(attrs, [
-      :rd_id,
+      :real_debrid_torrent_id,
       :filename,
-      :hash,
+      :real_debrid_torrent_hash,
       :bytes,
       :host,
       :split,
@@ -60,9 +60,9 @@ defmodule SyncEngine.Schemas.Torrent do
       :deletion_last_attempted_at,
       :deletion_error
     ])
-    |> validate_required([:rd_id, :filename, :hash, :bytes])
-    |> unique_constraint(:rd_id)
-    # Note: hash is NOT unique - multiple torrent instances can have the same hash
+    |> validate_required([:real_debrid_torrent_id, :filename, :real_debrid_torrent_hash, :bytes])
+    |> unique_constraint(:real_debrid_torrent_id)
+    # Note: real_debrid_torrent_hash is NOT unique - multiple torrent instances can have the same hash
     |> foreign_key_constraint(:inode_id)
   end
 
@@ -72,9 +72,9 @@ defmodule SyncEngine.Schemas.Torrent do
   def from_rd_api(attrs) when is_map(attrs) do
     %__MODULE__{}
     |> changeset(%{
-      rd_id: attrs[:id] || attrs["id"],
+      real_debrid_torrent_id: attrs[:id] || attrs["id"],
       filename: attrs[:filename] || attrs["filename"],
-      hash: attrs[:hash] || attrs["hash"],
+      real_debrid_torrent_hash: attrs[:hash] || attrs["hash"],
       bytes: attrs[:bytes] || attrs["bytes"],
       host: attrs[:host] || attrs["host"],
       split: attrs[:split] || attrs["split"],

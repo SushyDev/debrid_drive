@@ -41,7 +41,7 @@ defmodule SyncEngine.Torrents do
   Gets a torrent by its Real Debrid ID.
   """
   def get_torrent_by_rd_id(rd_id) do
-    case Repo.get_by(Torrent, rd_id: rd_id) do
+    case Repo.get_by(Torrent, real_debrid_torrent_id: rd_id) do
       nil -> {:error, :not_found}
       torrent -> {:ok, torrent}
     end
@@ -51,7 +51,7 @@ defmodule SyncEngine.Torrents do
   Gets a torrent by its hash.
   """
   def get_torrent_by_hash(hash) do
-    case Repo.get_by(Torrent, hash: hash) do
+    case Repo.get_by(Torrent, real_debrid_torrent_hash: hash) do
       nil -> {:error, :not_found}
       torrent -> {:ok, torrent}
     end
@@ -75,7 +75,7 @@ defmodule SyncEngine.Torrents do
     # The unique constraint is on :rd_id
     Repo.insert(changeset,
       on_conflict: :replace_all_except_primary_key,
-      conflict_target: :rd_id
+      conflict_target: :real_debrid_torrent_id
     )
   end
 
@@ -112,7 +112,7 @@ defmodule SyncEngine.Torrents do
   """
   def list_torrent_files(torrent_hash) when is_binary(torrent_hash) do
     TorrentFile
-    |> where([f], f.torrent_hash == ^torrent_hash)
+    |> where([f], f.real_debrid_torrent_hash == ^torrent_hash)
     |> Repo.all()
   end
 
@@ -133,7 +133,7 @@ defmodule SyncEngine.Torrents do
     # Preserve hardlink_count to avoid resetting reference tracking
     Repo.insert(changeset,
       on_conflict: {:replace, [:path, :bytes, :selected, :link, :updated_at]},
-      conflict_target: [:torrent_hash, :torrent_rd_id, :rd_id]
+      conflict_target: [:real_debrid_torrent_hash, :real_debrid_torrent_id, :real_debrid_torrent_file_id]
     )
   end
 
@@ -175,7 +175,7 @@ defmodule SyncEngine.Torrents do
   """
   def get_torrents_by_hash do
     list_torrents()
-    |> Enum.map(&{&1.hash, &1})
+    |> Enum.map(&{&1.real_debrid_torrent_hash, &1})
     |> Map.new()
   end
 
@@ -184,7 +184,7 @@ defmodule SyncEngine.Torrents do
   """
   def get_torrents_by_rd_id do
     list_torrents()
-    |> Enum.map(&{&1.rd_id, &1})
+    |> Enum.map(&{&1.real_debrid_torrent_id, &1})
     |> Map.new()
   end
 
@@ -202,7 +202,7 @@ defmodule SyncEngine.Torrents do
   """
   def torrent_rejected?(rd_id) do
     RejectedTorrent
-    |> where([rejected_torrent], rejected_torrent.rd_id == ^rd_id)
+    |> where([rejected_torrent], rejected_torrent.real_debrid_torrent_id == ^rd_id)
     |> Repo.exists?()
   end
 
@@ -210,7 +210,7 @@ defmodule SyncEngine.Torrents do
   Gets a rejected torrent by Real Debrid ID.
   """
   def get_rejected_torrent(rd_id) do
-    case Repo.get_by(RejectedTorrent, rd_id: rd_id) do
+    case Repo.get_by(RejectedTorrent, real_debrid_torrent_id: rd_id) do
       nil -> {:error, :not_found}
       rejected -> {:ok, rejected}
     end
@@ -221,7 +221,7 @@ defmodule SyncEngine.Torrents do
   """
   def get_rejected_torrents_by_rd_id do
     list_rejected_torrents()
-    |> Enum.map(&{&1.rd_id, &1})
+    |> Enum.map(&{&1.real_debrid_torrent_id, &1})
     |> Map.new()
   end
 
@@ -373,8 +373,8 @@ defmodule SyncEngine.Torrents do
           # Get all torrent files belonging to THIS SPECIFIC torrent instance
           torrent_files =
             SyncEngine.Queries.TorrentFileQueries.get_files_for_torrent(
-              torrent.hash,
-              torrent.rd_id
+              torrent.real_debrid_torrent_hash,
+              torrent.real_debrid_torrent_id
             )
 
           # Handle directory entries (hardlinks) pointing to this torrent's files
@@ -385,8 +385,8 @@ defmodule SyncEngine.Torrents do
 
           # Delete all torrent_file records belonging to THIS SPECIFIC torrent instance
           TorrentFile
-          |> where([f], f.torrent_hash == ^torrent.hash)
-          |> where([f], f.torrent_rd_id == ^torrent.rd_id)
+          |> where([f], f.real_debrid_torrent_hash == ^torrent.real_debrid_torrent_hash)
+          |> where([f], f.real_debrid_torrent_id == ^torrent.real_debrid_torrent_id)
           |> Repo.delete_all()
 
           # Nullify the foreign key before attempting any inode deletion
@@ -510,15 +510,15 @@ defmodule SyncEngine.Torrents do
           # Filter by both hash AND torrent_rd_id to only check files from this torrent instance
           query =
             TorrentFile
-            |> where([torrent_file], torrent_file.torrent_hash == ^updated.torrent_hash)
-            |> where([torrent_file], torrent_file.torrent_rd_id == ^updated.torrent_rd_id)
+            |> where([torrent_file], torrent_file.real_debrid_torrent_hash == ^updated.real_debrid_torrent_hash)
+            |> where([torrent_file], torrent_file.real_debrid_torrent_id == ^updated.real_debrid_torrent_id)
             |> select([torrent_file], torrent_file.hardlink_count)
 
           counts = Repo.all(query)
           should_delete = Enum.all?(counts, &(&1 == 0))
 
           # Return the torrent_rd_id so caller knows which torrent to delete
-          {:ok, {new_count, should_delete, updated.torrent_rd_id}}
+          {:ok, {new_count, should_delete, updated.real_debrid_torrent_id}}
 
         {:error, reason} ->
           Repo.rollback(reason)
@@ -585,9 +585,9 @@ defmodule SyncEngine.Torrents do
     # Find other torrent_files (excluding the one being deleted) with same hash + path
     other_files =
       SyncEngine.Queries.TorrentFileQueries.find_others_for_path(
-        torrent_file.torrent_hash,
+        torrent_file.real_debrid_torrent_hash,
         torrent_file.path,
-        torrent.rd_id
+        torrent.real_debrid_torrent_id
       )
 
     case other_files do

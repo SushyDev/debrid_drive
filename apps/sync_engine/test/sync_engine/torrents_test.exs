@@ -23,7 +23,7 @@ defmodule SyncEngine.TorrentsTest do
       {:ok, node} = VFS.create_directory(test_dir.inode_id, "test_torrent")
 
       attrs = %{
-        rd_id: "TEST123",
+        real_debrid_torrent_id: "TEST123",
         filename: "Test Torrent",
         hash: "abc123def456",
         bytes: 1_000_000,
@@ -32,9 +32,9 @@ defmodule SyncEngine.TorrentsTest do
       }
 
       assert {:ok, %Torrent{} = torrent} = Torrents.create_torrent(attrs)
-      assert torrent.rd_id == "TEST123"
+      assert torrent.real_debrid_torrent_id == "TEST123"
       assert torrent.filename == "Test Torrent"
-      assert torrent.hash == "abc123def456"
+      assert torrent.real_debrid_torrent_hash == "abc123def456"
       assert torrent.inode_id == node.inode_id
     end
 
@@ -43,7 +43,7 @@ defmodule SyncEngine.TorrentsTest do
       {:ok, node2} = VFS.create_directory(test_dir.inode_id, "torrent2")
 
       attrs1 = %{
-        rd_id: "DUPLICATE123",
+        real_debrid_torrent_id: "DUPLICATE123",
         filename: "First",
         hash: "hash1",
         bytes: 100,
@@ -51,7 +51,7 @@ defmodule SyncEngine.TorrentsTest do
       }
 
       attrs2 = %{
-        rd_id: "DUPLICATE123",
+        real_debrid_torrent_id: "DUPLICATE123",
         filename: "Second",
         hash: "hash2",
         bytes: 200,
@@ -67,7 +67,7 @@ defmodule SyncEngine.TorrentsTest do
       {:ok, node} = VFS.create_directory(test_dir.inode_id, "test")
 
       attrs = %{
-        rd_id: "FIND_ME",
+        real_debrid_torrent_id: "FIND_ME",
         filename: "Find Me",
         hash: "hash",
         bytes: 100,
@@ -83,7 +83,7 @@ defmodule SyncEngine.TorrentsTest do
       {:ok, node} = VFS.create_directory(test_dir.inode_id, "delete_me")
 
       attrs = %{
-        rd_id: "DELETE_ME",
+        real_debrid_torrent_id: "DELETE_ME",
         filename: "Delete Me",
         hash: "hash",
         bytes: 100,
@@ -101,7 +101,7 @@ defmodule SyncEngine.TorrentsTest do
 
       # Create first torrent with hash "same_hash_123"
       attrs1 = %{
-        rd_id: "RD1",
+        real_debrid_torrent_id: "RD1",
         filename: "First Add",
         hash: "same_hash_123",
         bytes: 1_000_000,
@@ -115,7 +115,7 @@ defmodule SyncEngine.TorrentsTest do
 
       # Create second torrent with same hash but different rd_id
       attrs2 = %{
-        rd_id: "RD2",
+        real_debrid_torrent_id: "RD2",
         filename: "Re-added or Different RD",
         hash: "same_hash_123",
         bytes: 1_000_000,
@@ -142,7 +142,7 @@ defmodule SyncEngine.TorrentsTest do
 
       {:ok, _} =
         Torrents.create_torrent(%{
-          rd_id: "T1",
+          real_debrid_torrent_id: "T1",
           filename: "Torrent 1",
           hash: "h1",
           bytes: 100,
@@ -151,7 +151,7 @@ defmodule SyncEngine.TorrentsTest do
 
       {:ok, _} =
         Torrents.create_torrent(%{
-          rd_id: "T2",
+          real_debrid_torrent_id: "T2",
           filename: "Torrent 2",
           hash: "h2",
           bytes: 200,
@@ -171,7 +171,7 @@ defmodule SyncEngine.TorrentsTest do
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
-          rd_id: "TORRENT1",
+          real_debrid_torrent_id: "TORRENT1",
           filename: "Test Torrent",
           hash: "hash",
           bytes: 1000,
@@ -185,19 +185,19 @@ defmodule SyncEngine.TorrentsTest do
 
     test "create_torrent_file/1 creates file", %{torrent: torrent, file_node: file_node} do
       attrs = %{
-        rd_id: 1,
+        real_debrid_torrent_id: 1,
         path: "/test_file.mp4",
         bytes: 500,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         inode_id: file_node.inode_id
       }
 
       assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
       assert file.rd_id == 1
       assert file.path == "/test_file.mp4"
-      assert file.torrent_hash == torrent.hash
+      assert file.real_debrid_torrent_hash == torrent.real_debrid_torrent_hash
     end
 
     test "list_torrent_files/1 returns files for torrent", %{
@@ -206,45 +206,45 @@ defmodule SyncEngine.TorrentsTest do
     } do
       {:ok, _} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file1.mp4",
           bytes: 500,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 
-      files = Torrents.list_torrent_files(torrent.hash)
+      files = Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)
       assert length(files) == 1
     end
 
     test "delete_torrent cascades to files", %{torrent: torrent, file_node: file_node} do
       {:ok, _} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file.mp4",
           bytes: 500,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 
-      assert length(Torrents.list_torrent_files(torrent.hash)) == 1
+      assert length(Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)) == 1
       {:ok, _} = Torrents.delete_torrent(torrent)
-      assert length(Torrents.list_torrent_files(torrent.hash)) == 0
+      assert length(Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)) == 0
     end
 
     test "create_torrent_file/1 creates virtual inode (inode_id: nil)", %{torrent: torrent} do
       # Virtual inodes don't have a VFS node yet - just the torrent_file record
       attrs = %{
-        rd_id: 2,
+        real_debrid_torrent_id: 2,
         path: "/movie.mkv",
         bytes: 2_000_000,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         inode_id: nil,
         link: "https://real-debrid.com/unrestrict?link=abc123"
       }
@@ -252,7 +252,7 @@ defmodule SyncEngine.TorrentsTest do
       assert {:ok, %TorrentFile{} = file} = Torrents.create_torrent_file(attrs)
       assert file.rd_id == 2
       assert file.path == "/movie.mkv"
-      assert file.torrent_hash == torrent.hash
+      assert file.real_debrid_torrent_hash == torrent.real_debrid_torrent_hash
       assert file.inode_id == nil
       assert file.hardlink_count == 1
       assert file.link == "https://real-debrid.com/unrestrict?link=abc123"
@@ -262,12 +262,12 @@ defmodule SyncEngine.TorrentsTest do
       # Create virtual inode
       {:ok, virtual_inode} =
         Torrents.create_torrent_file(%{
-          rd_id: 3,
+          real_debrid_torrent_id: 3,
           path: "/series.mkv",
           bytes: 3_000_000,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: nil,
           link: "https://real-debrid.com/unrestrict?link=def456"
         })
@@ -310,24 +310,24 @@ defmodule SyncEngine.TorrentsTest do
       # Create two virtual inodes in the same torrent
       {:ok, file1} =
         Torrents.create_torrent_file(%{
-          rd_id: 4,
+          real_debrid_torrent_id: 4,
           path: "/movie.mkv",
           bytes: 5_000_000,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: nil,
           link: "https://real-debrid.com/link1"
         })
 
       {:ok, file2} =
         Torrents.create_torrent_file(%{
-          rd_id: 5,
+          real_debrid_torrent_id: 5,
           path: "/subtitle.srt",
           bytes: 100_000,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: nil,
           link: "https://real-debrid.com/link2"
         })
@@ -348,12 +348,12 @@ defmodule SyncEngine.TorrentsTest do
     test "create_torrent_file/1 merges on conflict with conditional upsert (torrent_hash + rd_id)", %{torrent: torrent} do
       # Create initial file
       attrs1 = %{
-        rd_id: 10,
+        real_debrid_torrent_id: 10,
         path: "/original.mkv",
         bytes: 1_000_000,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         inode_id: nil,
         link: "https://real-debrid.com/link_old"
       }
@@ -368,12 +368,12 @@ defmodule SyncEngine.TorrentsTest do
 
       # Insert same torrent_hash + rd_id with different data (merge with newer timestamp)
       attrs2 = %{
-        rd_id: 10,
+        real_debrid_torrent_id: 10,
         path: "/updated.mkv",
         bytes: 2_000_000,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         inode_id: nil,
         link: "https://real-debrid.com/link_new"
       }
@@ -387,7 +387,7 @@ defmodule SyncEngine.TorrentsTest do
       assert file2.updated_at >= original_updated_at
 
       # Verify only one record exists with this torrent_hash + rd_id combination
-      files = Torrents.list_torrent_files(torrent.hash)
+      files = Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)
       matching_files = Enum.filter(files, fn f -> f.rd_id == 10 end)
       assert length(matching_files) == 1
       assert hd(matching_files).link == "https://real-debrid.com/link_new"
@@ -397,12 +397,12 @@ defmodule SyncEngine.TorrentsTest do
       # Scenario: Add same torrent hash, but select different files each time
       # First: add file1 (rd_id=100)
       attrs1 = %{
-        rd_id: 100,
+        real_debrid_torrent_id: 100,
         path: "/file1.mkv",
         bytes: 1_000_000,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         link: "https://real-debrid.com/link1"
       }
 
@@ -412,12 +412,12 @@ defmodule SyncEngine.TorrentsTest do
 
       # Second: add file2 (rd_id=200) - different file, same hash
       attrs2 = %{
-        rd_id: 200,
+        real_debrid_torrent_id: 200,
         path: "/file2.mkv",
         bytes: 2_000_000,
         selected: 1,
-        torrent_hash: torrent.hash,
-        torrent_rd_id: torrent.rd_id,
+        real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+        torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
         link: "https://real-debrid.com/link2"
       }
 
@@ -426,7 +426,7 @@ defmodule SyncEngine.TorrentsTest do
       assert file2.path == "/file2.mkv"
 
       # Verify both files exist under the same hash
-      files = Torrents.list_torrent_files(torrent.hash)
+      files = Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)
       assert length(files) == 2
 
       file1_from_db = Enum.find(files, fn f -> f.rd_id == 100 end)
@@ -442,7 +442,7 @@ defmodule SyncEngine.TorrentsTest do
   describe "rejected_torrents" do
     test "reject_torrent/1 creates rejected torrent" do
       attrs = %{
-        rd_id: "REJECTED1",
+        real_debrid_torrent_id: "REJECTED1",
         filename: "Bad Torrent",
         hash: "badhash",
         reason: "file_link_mismatch"
@@ -457,7 +457,7 @@ defmodule SyncEngine.TorrentsTest do
 
     test "torrent_rejected?/1 checks if torrent is rejected" do
       attrs = %{
-        rd_id: "CHECK_REJECTED",
+        real_debrid_torrent_id: "CHECK_REJECTED",
         filename: "Rejected",
         reason: "invalid_data"
       }
@@ -470,14 +470,14 @@ defmodule SyncEngine.TorrentsTest do
     test "get_rejected_torrents_by_rd_id/0 returns map" do
       {:ok, _} =
         Torrents.reject_torrent(%{
-          rd_id: "R1",
+          real_debrid_torrent_id: "R1",
           filename: "Rejected 1",
           reason: "test"
         })
 
       {:ok, _} =
         Torrents.reject_torrent(%{
-          rd_id: "R2",
+          real_debrid_torrent_id: "R2",
           filename: "Rejected 2",
           reason: "test"
         })
@@ -491,7 +491,7 @@ defmodule SyncEngine.TorrentsTest do
     test "increment_rejection_attempts/1 increments counter" do
       {:ok, rejected} =
         Torrents.reject_torrent(%{
-          rd_id: "INCREMENT_ME",
+          real_debrid_torrent_id: "INCREMENT_ME",
           filename: "Test",
           reason: "test"
         })
@@ -505,7 +505,7 @@ defmodule SyncEngine.TorrentsTest do
     test "delete_rejected_torrent/1 removes rejected torrent" do
       {:ok, rejected} =
         Torrents.reject_torrent(%{
-          rd_id: "DELETE_REJECTED",
+          real_debrid_torrent_id: "DELETE_REJECTED",
           filename: "Test",
           reason: "test"
         })

@@ -26,7 +26,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
-          rd_id: "VALID123",
+          real_debrid_torrent_id: "VALID123",
           filename: "Valid Torrent",
           hash: "hash123",
           bytes: 1000,
@@ -35,12 +35,12 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, _file} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/video.mp4",
           bytes: 1000,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 
@@ -54,7 +54,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       # Torrent still exists
       assert {:ok, _} = Torrents.get_torrent_by_rd_id("VALID123")
-      assert length(Torrents.list_torrent_files(torrent.hash)) == 1
+      assert length(Torrents.list_torrent_files(torrent.real_debrid_torrent_hash)) == 1
     end
 
     test "handles torrent with no files", %{test_dir: test_dir} do
@@ -63,7 +63,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
-          rd_id: "EMPTY123",
+          real_debrid_torrent_id: "EMPTY123",
           filename: "Empty Torrent",
           hash: "hash",
           bytes: 0,
@@ -91,7 +91,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, valid_torrent1} =
         Torrents.create_torrent(%{
-          rd_id: "VALID1",
+          real_debrid_torrent_id: "VALID1",
           filename: "Valid 1",
           hash: "hash1",
           bytes: 100,
@@ -100,12 +100,12 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, _} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file1.mp4",
           bytes: 100,
           selected: 1,
-          torrent_hash: valid_torrent1.hash,
-          torrent_rd_id: valid_torrent1.rd_id,
+          real_debrid_real_debrid_torrent_hash: valid_torrent1.hash,
+          torrent_real_debrid_torrent_id: valid_torrent1.rd_id,
           inode_id: valid_file1.inode_id
         })
 
@@ -114,7 +114,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, valid_torrent2} =
         Torrents.create_torrent(%{
-          rd_id: "VALID2",
+          real_debrid_torrent_id: "VALID2",
           filename: "Valid 2",
           hash: "hash2",
           bytes: 200,
@@ -123,12 +123,12 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, _} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/file2.mp4",
           bytes: 200,
           selected: 1,
-          torrent_hash: valid_torrent2.hash,
-          torrent_rd_id: valid_torrent2.rd_id,
+          real_debrid_real_debrid_torrent_hash: valid_torrent2.hash,
+          torrent_real_debrid_torrent_id: valid_torrent2.rd_id,
           inode_id: valid_file2.inode_id
         })
 
@@ -166,7 +166,7 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, torrent} =
         Torrents.create_torrent(%{
-          rd_id: "FIND_ME",
+          real_debrid_torrent_id: "FIND_ME",
           filename: "Find Me",
           hash: "hash",
           bytes: 1000,
@@ -175,12 +175,12 @@ defmodule SyncEngine.TorrentVerifierTest do
 
       {:ok, _} =
         Torrents.create_torrent_file(%{
-          rd_id: 1,
+          real_debrid_torrent_id: 1,
           path: "/video.mp4",
           bytes: 1000,
           selected: 1,
-          torrent_hash: torrent.hash,
-          torrent_rd_id: torrent.rd_id,
+          real_debrid_real_debrid_torrent_hash: torrent.real_debrid_torrent_hash,
+          torrent_real_debrid_torrent_id: torrent.real_debrid_torrent_id,
           inode_id: file_node.inode_id
         })
 

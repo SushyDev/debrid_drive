@@ -19,9 +19,9 @@ defmodule SyncEngine.Queries.TorrentFileQueries do
   """
   def find_most_recent(hash, path) do
     TorrentFile
-    |> where([f], f.torrent_hash == ^hash)
+    |> where([f], f.real_debrid_torrent_hash == ^hash)
     |> where([f], f.path == ^path)
-    |> join(:inner, [f], t in Torrent, on: f.torrent_rd_id == t.rd_id)
+    |> join(:inner, [f], t in Torrent, on: f.real_debrid_torrent_id == t.real_debrid_torrent_id)
     |> order_by([f, t], desc: t.added, desc: f.inserted_at)
     |> limit(1)
     |> select([f, _t], f)
@@ -36,10 +36,10 @@ defmodule SyncEngine.Queries.TorrentFileQueries do
   """
   def find_others_for_path(hash, path, excluding_rd_id) do
     TorrentFile
-    |> where([f], f.torrent_hash == ^hash)
+    |> where([f], f.real_debrid_torrent_hash == ^hash)
     |> where([f], f.path == ^path)
-    |> where([f], f.torrent_rd_id != ^excluding_rd_id)
-    |> join(:inner, [f], t in Torrent, on: f.torrent_rd_id == t.rd_id)
+    |> where([f], f.real_debrid_torrent_id != ^excluding_rd_id)
+    |> join(:inner, [f], t in Torrent, on: f.real_debrid_torrent_id == t.real_debrid_torrent_id)
     |> order_by([f, t], desc: t.added, desc: f.inserted_at)
     |> select([f, _t], f)
     |> Repo.all()
@@ -56,8 +56,8 @@ defmodule SyncEngine.Queries.TorrentFileQueries do
   def all_hardlinks_zero?(hash, torrent_rd_id) do
     hardlink_counts =
       TorrentFile
-      |> where([f], f.torrent_hash == ^hash)
-      |> where([f], f.torrent_rd_id == ^torrent_rd_id)
+      |> where([f], f.real_debrid_torrent_hash == ^hash)
+      |> where([f], f.real_debrid_torrent_id == ^torrent_rd_id)
       |> select([f], f.hardlink_count)
       |> Repo.all()
 
@@ -72,8 +72,8 @@ defmodule SyncEngine.Queries.TorrentFileQueries do
   """
   def get_files_for_torrent(hash, torrent_rd_id) do
     TorrentFile
-    |> where([f], f.torrent_hash == ^hash)
-    |> where([f], f.torrent_rd_id == ^torrent_rd_id)
+    |> where([f], f.real_debrid_torrent_hash == ^hash)
+    |> where([f], f.real_debrid_torrent_id == ^torrent_rd_id)
     |> Repo.all()
   end
 end
