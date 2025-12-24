@@ -299,6 +299,25 @@ defmodule VFS do
   end
 
   @doc """
+  Finds an inode by its virtual inode type and ID.
+
+  Returns `{:ok, inode}` if found, `{:error, :not_found}` otherwise.
+  """
+  def find_inode_by_virtual_id(virtual_type, virtual_id) do
+    inode =
+      Inode
+      |> where([i], i.virtual_inode_type == ^virtual_type)
+      |> where([i], i.virtual_inode_id == ^virtual_id)
+      |> limit(1)
+      |> Repo.one()
+
+    case inode do
+      nil -> {:error, :not_found}
+      inode -> {:ok, inode}
+    end
+  end
+
+  @doc """
   Gets an inode by ID (legacy name).
 
   **Deprecated**: Use `get_inode/1` instead. This function exists for backward
