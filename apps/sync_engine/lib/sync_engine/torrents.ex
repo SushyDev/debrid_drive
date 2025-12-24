@@ -453,11 +453,23 @@ defmodule SyncEngine.Torrents do
   @doc """
   Increments the hardlink count for a virtual inode.
   Called when a new hardlink is created to a torrent file.
+
+  Uses row-level locking to prevent lost increments in concurrent scenarios
+  where multiple inodes might be updated to point to the same replacement file.
   """
   def increment_hardlink_count(%TorrentFile{} = torrent_file) do
-    torrent_file
-    |> Ecto.Changeset.change(%{hardlink_count: torrent_file.hardlink_count + 1})
-    |> Repo.update()
+    Repo.transact(fn ->
+      # Reload and lock the row for update within the transaction
+      locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
+
+      locked_file
+      |> Ecto.Changeset.change(%{hardlink_count: locked_file.hardlink_count + 1})
+      |> Repo.update!()
+    end)
+    |> case do
+      {:ok, updated} -> {:ok, updated}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
