@@ -403,26 +403,14 @@ defmodule SyncEngine.Services.TorrentSync do
   defp remove_torrent(db_torrent) do
     Logger.info("Removing torrent: #{db_torrent.filename} (#{db_torrent.rd_id})")
 
-    # Delete the torrent (cascade will handle files and VFS nodes)
-    with {:ok, _} <- SyncEngine.Torrents.delete_torrent(db_torrent) do
-      # Also delete the VFS node for the torrent directory with cascade, if it exists
-      if db_torrent.inode_id do
-        try do
-          VFS.remove_by_id(db_torrent.inode_id, cascade: true)
-          {:ok, db_torrent}
-        rescue
-          error ->
-            Logger.error("Failed to remove VFS node for torrent #{db_torrent.rd_id}: #{inspect(error)}")
-
-            {:error, error}
-        end
-      else
+    # Use proper cleanup that handles VFS inodes, directory entries, and files
+    case SyncEngine.Torrents.cleanup_after_deletion_by_rd_id(db_torrent.rd_id) do
+      :ok ->
         {:ok, db_torrent}
-      end
-    else
-      error ->
-        Logger.error("Failed to remove torrent #{db_torrent.rd_id}: #{inspect(error)}")
-        error
+
+      {:error, reason} ->
+        Logger.error("Failed to remove torrent #{db_torrent.rd_id}: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 

@@ -379,8 +379,12 @@ defmodule SyncEngine.Torrents do
           |> where([f], f.torrent_rd_id == ^torrent.rd_id)
           |> Repo.delete_all()
 
-          # Delete the torrent record
-          Repo.delete!(torrent)
+          # Nullify the foreign key before attempting any inode deletion
+          # This is required due to foreign key constraint with on_delete: :restrict
+          torrent =
+            torrent
+            |> Ecto.Changeset.change(%{inode_id: nil})
+            |> Repo.update!()
 
           # Try to delete the parent directory if it's empty
           if parent_inode_id do
@@ -392,7 +396,6 @@ defmodule SyncEngine.Torrents do
                 if length(children) == 0 do
                   # Delete empty torrent directory
                   # Need to find the directory entry for this inode to delete it
-                  # Get the parent of this directory to call remove_entry
                   case VFS.DirectoryEntry
                        |> where([directory_entry], directory_entry.inode_id == ^inode.inode_id)
                        |> limit(1)
@@ -416,6 +419,9 @@ defmodule SyncEngine.Torrents do
                 :ok
             end
           end
+
+          # Delete the torrent record (inode_id is now NULL, so safe to delete)
+          Repo.delete!(torrent)
 
           {:ok, :ok}
 
@@ -447,11 +453,23 @@ defmodule SyncEngine.Torrents do
   @doc """
   Increments the hardlink count for a virtual inode.
   Called when a new hardlink is created to a torrent file.
+
+  Uses row-level locking to prevent lost increments in concurrent scenarios
+  where multiple inodes might be updated to point to the same replacement file.
   """
   def increment_hardlink_count(%TorrentFile{} = torrent_file) do
-    torrent_file
-    |> Ecto.Changeset.change(%{hardlink_count: torrent_file.hardlink_count + 1})
-    |> Repo.update()
+    Repo.transact(fn ->
+      # Reload and lock the row for update within the transaction
+      locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
+
+      locked_file
+      |> Ecto.Changeset.change(%{hardlink_count: locked_file.hardlink_count + 1})
+      |> Repo.update!()
+    end)
+    |> case do
+      {:ok, updated} -> {:ok, updated}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
