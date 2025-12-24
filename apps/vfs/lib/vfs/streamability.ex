@@ -1,61 +1,40 @@
 defmodule VFS.Streamability do
   @moduledoc """
-  Streamability detection for hardlinks to virtual inodes (torrent files).
+  Streamability detection for virtual inodes (torrent files from Real Debrid).
 
-  A node is **streamable** if and only if:
-  1. It is a hardlink to a virtual inode (torrent_file)
-  2. The target virtual inode has a download link from Real Debrid
+  A node is **streamable** if it is a virtual inode (torrent file), regardless of
+  whether a download link is currently cached. Download links are fetched on-demand
+  with automatic caching and expiration handling.
 
   This module provides:
-  - `streamable?/1` - Determine if a node is streamable (with smart preloading fallback)
+  - `streamable?/1` - Check if a node is a virtual inode (streamable)
+  - `virtual_inode_has_link?/1` - Check if a torrent file has a cached link
   - `preload_for_streamability/1` - Preload virtual inodes for efficient batch checking
-  - `virtual_inode_streamable?/1` - Check if a torrent_file is streamable
 
   ## Usage Examples
 
-  ### Single Node (with automatic fallback)
+  ### Check if a node is streamable
   ```elixir
-  node = VFS.get_node(node_id)
-  if VFS.Streamability.streamable?(node) do
-    # Can stream this file
+  inode = VFS.get_node(node_id)
+  if VFS.Streamability.streamable?(inode) do
+    # This is a virtual inode - use streaming API
   end
   ```
 
-  ### Multiple Nodes (with preloading for efficiency)
-  ```elixir
-  nodes = VFS.list_children(parent_id)
-    |> VFS.Streamability.preload_for_streamability()  # Load in single query
-
-  Enum.each(nodes, fn node ->
-    if VFS.Streamability.streamable?(node) do
-      # Can stream - no extra queries!
-    end
-  end)
-  ```
-
-  ### Torrent Files
+  ### Check if a link is currently cached (diagnostic)
   ```elixir
   torrent_file = SyncEngine.Torrents.get_torrent_file_by_id(id)
-  if VFS.Streamability.virtual_inode_streamable?(torrent_file) do
-    # This virtual inode can be streamed
+  if VFS.Streamability.virtual_inode_has_link?(torrent_file) do
+    # Has a cached link (but will be fetched on-demand if expired)
   end
   ```
-
-  ## Performance Characteristics
-
-  | Scenario | Behavior | Queries |
-  |----------|----------|---------|
-  | Preloaded node | Uses preloaded data | 0 |
-  | Not preloaded hardlink | Queries torrent_file by ID | 1 |
-  | Not preloaded regular file | No query needed | 0 |
-  | Batch (preloaded) | All in one query | 1 |
 
   ## Design Philosophy
 
-  - **Single source of truth**: Only `torrent_files.link` determines streamability
-  - **Smart fallback**: Detects preloaded data automatically, queries only if needed
-  - **Idiomatic Elixir**: Simple functions, pattern matching, clear naming
-  - **Zero denormalization risk**: No cached state to desync
+  - **Simple streamability**: A virtual inode is always streamable
+  - **On-demand links**: Links are fetched when needed, not checked upfront
+  - **Automatic caching**: Links are cached with expiration for 4 hours
+  - **Zero synchronization issues**: No cached state to become stale
   """
 
   alias VFS.{Inode, Repo}
@@ -66,19 +45,14 @@ defmodule VFS.Streamability do
   @doc """
   Determines if an inode is streamable.
 
-  An inode is streamable if:
-  1. It's a virtual inode (has virtual_inode_type and virtual_inode_id)
-  2. The target virtual inode has a download link
+  An inode is streamable if it's a virtual inode (torrent file from Real Debrid).
+  This means it has both virtual_inode_type and virtual_inode_id set.
 
-  ## Strategy
-  - If the inode has a `torrent_file` field attached, uses that (zero queries)
-  - If not but is a virtual inode, queries torrent_file by ID (one query)
-  - Otherwise returns false (no query)
-
-  Also accepts map structs (like torrent_file) directly.
+  Note: This does NOT check if a download link is available. Links are fetched
+  on-demand with caching when get_stream_url is called.
 
   ## Examples
-      iex> inode = %VFS.Inode{virtual_inode_type: "torrent_file", virtual_inode_id: 123} |> Map.put(:torrent_file, %{link: "https://..."})
+      iex> inode = %VFS.Inode{virtual_inode_type: "torrent_file", virtual_inode_id: 123}
       iex> VFS.Streamability.streamable?(inode)
       true
 
@@ -88,48 +62,48 @@ defmodule VFS.Streamability do
   """
   @spec streamable?(Inode.t() | map()) :: boolean()
   def streamable?(%Inode{} = inode) do
-    # Only virtual inodes can be streamable
-    if inode.virtual_inode_type == "torrent_file" and not is_nil(inode.virtual_inode_id) do
-      check_virtual_inode_streamability(inode)
-    else
-      false
-    end
+    # A virtual inode (torrent file) is streamable
+    VFS.is_virtual_inode?(inode)
   end
 
-  # Check if it's a torrent_file struct by checking if it has a :link field
+  # For map structs (like torrent_file), check if it has an id field
   # This avoids a direct dependency on SyncEngine.Schemas.TorrentFile
   def streamable?(map) when is_map(map) do
-    case Map.fetch(map, :link) do
-      {:ok, link} -> not is_nil(link)
-      :error -> false
-    end
+    # If it's a torrent_file struct, it's streamable
+    Map.has_key?(map, :real_debrid_torrent_file_id)
   end
 
   def streamable?(_), do: false
 
   @doc """
-  Checks if a virtual inode (torrent_file) is streamable.
+  Checks if a virtual inode (torrent_file) has a download link available.
 
-  A virtual inode is streamable if it has a link field set.
+  Note: This is different from streamable?/1. A torrent file is always streamable
+  (can use the streaming API), but this function checks if a link is currently available.
+  Links are fetched on-demand, so this is mainly useful for diagnostics.
 
   ## Examples
       iex> torrent_file = %{link: "https://real-debrid.com/..."}
-      iex> VFS.Streamability.virtual_inode_streamable?(torrent_file)
+      iex> VFS.Streamability.virtual_inode_has_link?(torrent_file)
       true
 
       iex> torrent_file = %{link: nil}
-      iex> VFS.Streamability.virtual_inode_streamable?(torrent_file)
+      iex> VFS.Streamability.virtual_inode_has_link?(torrent_file)
       false
   """
-  @spec virtual_inode_streamable?(map()) :: boolean()
-  def virtual_inode_streamable?(map) when is_map(map) do
+  @spec virtual_inode_has_link?(map()) :: boolean()
+  def virtual_inode_has_link?(map) when is_map(map) do
     case Map.fetch(map, :link) do
       {:ok, link} -> not is_nil(link)
       :error -> false
     end
   end
 
-  def virtual_inode_streamable?(_), do: false
+  def virtual_inode_has_link?(_), do: false
+
+  # Deprecated: Use virtual_inode_has_link?/1 instead
+  @deprecated "Use virtual_inode_has_link?/1 instead"
+  def virtual_inode_streamable?(map), do: virtual_inode_has_link?(map)
 
   @doc """
   Preloads virtual inodes for a list of inodes efficiently.
@@ -210,38 +184,4 @@ defmodule VFS.Streamability do
   end
 
   def preload_for_streamability(non_list), do: non_list
-
-  # Private: Check if a virtual inode is streamable
-  defp check_virtual_inode_streamability(inode) do
-    # Virtual inode - try to get the torrent_file data
-    case inode.virtual_inode_id do
-      nil ->
-        false
-
-      vid ->
-        # Try to get the virtual inode (torrent_file)
-        case get_virtual_inode(inode, vid) do
-          {:ok, torrent_file} -> virtual_inode_streamable?(torrent_file)
-          {:error, _} -> false
-        end
-    end
-  end
-
-  # Private: Get virtual inode, preferring preloaded data
-  defp get_virtual_inode(inode, vid) do
-    # Check if torrent_file is already attached to the inode
-    case Map.get(inode, :torrent_file) do
-      nil ->
-        # Not preloaded, query by ID
-        SyncEngine.Torrents.get_torrent_file_by_id(vid)
-
-      torrent_file when is_map(torrent_file) ->
-        # Preloaded or manually set map
-        {:ok, torrent_file}
-
-      _ ->
-        # Some other value, try querying
-        SyncEngine.Torrents.get_torrent_file_by_id(vid)
-    end
-  end
 end
