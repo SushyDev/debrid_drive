@@ -522,7 +522,10 @@ defmodule GrpcServer.FileSystemService.Server do
   end
 
   defp is_streamable?(inode) do
-    VFS.Streamability.streamable?(inode)
+    # All virtual inodes should be marked as streamable, even if they don't have a link yet
+    # This ensures the FUSE client uses StreamableNode instead of FileNode
+    # If there's no link available, get_stream_url will return an error gracefully
+    VFS.is_virtual_inode?(inode)
   end
 
   # Resolves an inode for file operations (read, write, etc.)
