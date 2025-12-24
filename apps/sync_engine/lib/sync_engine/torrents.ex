@@ -462,14 +462,13 @@ defmodule SyncEngine.Torrents do
       # Reload and lock the row for update within the transaction
       locked_file = Repo.get!(TorrentFile, torrent_file.id, lock: "FOR UPDATE")
 
-      locked_file
-      |> Ecto.Changeset.change(%{hardlink_count: locked_file.hardlink_count + 1})
-      |> Repo.update!()
+      changeset = Ecto.Changeset.change(locked_file, %{hardlink_count: locked_file.hardlink_count + 1})
+
+      case Repo.update(changeset) do
+        {:ok, updated} -> {:ok, updated}
+        {:error, reason} -> {:error, reason}
+      end
     end)
-    |> case do
-      {:ok, updated} -> {:ok, updated}
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   @doc """
