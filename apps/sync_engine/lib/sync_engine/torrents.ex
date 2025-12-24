@@ -58,15 +58,25 @@ defmodule SyncEngine.Torrents do
   end
 
   @doc """
-  Creates a torrent.
+  Creates a torrent, or updates if it already exists (based on rd_id).
 
   Note: Multiple torrents can have the same hash (different rd_ids).
   rd_id is unique per torrent instance.
+
+  On conflict (duplicate rd_id), updates all fields with the latest data
+  from Real-Debrid.
   """
   def create_torrent(attrs) do
-    %Torrent{}
-    |> Torrent.changeset(attrs)
-    |> Repo.insert()
+    changeset =
+      %Torrent{}
+      |> Torrent.changeset(attrs)
+
+    # Upsert strategy: if torrent with this rd_id exists, update it with latest data
+    # The unique constraint is on :rd_id
+    Repo.insert(changeset,
+      on_conflict: :replace_all_except_primary_key,
+      conflict_target: :rd_id
+    )
   end
 
   @doc """
