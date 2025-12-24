@@ -450,6 +450,10 @@ defmodule VFS do
         end
       end
 
+      # Nullify any torrent or torrent_file references to this inode before deleting
+      # This prevents foreign key constraint violations
+      nullify_torrent_references(inode.inode_id)
+
       Repo.delete!(inode)
     else
       # Update nlink count
@@ -477,6 +481,27 @@ defmodule VFS do
         end
       end
     end
+
+    :ok
+  end
+
+  # Helper to nullify torrent and torrent_file references before deleting an inode
+  defp nullify_torrent_references(inode_id) do
+    import Ecto.Query
+
+    # Nullify torrents.inode_id references
+    from(t in SyncEngine.Schemas.Torrent,
+      where: t.inode_id == ^inode_id,
+      update: [set: [inode_id: nil]]
+    )
+    |> Repo.update_all([])
+
+    # Nullify torrent_files.inode_id references  
+    from(tf in SyncEngine.Schemas.TorrentFile,
+      where: tf.inode_id == ^inode_id,
+      update: [set: [inode_id: nil]]
+    )
+    |> Repo.update_all([])
 
     :ok
   end
