@@ -454,8 +454,7 @@ defmodule GrpcServer.FileSystemService.Server do
       %GetStreamUrlResponse{url: download_url}
     else
       {:error, :not_found} ->
-        # Return empty response for FUSE ENOENT
-        %GetStreamUrlResponse{}
+        raise GRPC.RPCError, status: :not_found, message: "Node not found"
 
       {:error, :not_streamable} ->
         raise GRPC.RPCError,
